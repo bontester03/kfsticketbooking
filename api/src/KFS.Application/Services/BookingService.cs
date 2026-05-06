@@ -202,7 +202,7 @@ public class BookingService : IBookingService
 
             var png = _qr.RenderPng(item.QrCodePayload);
             item.QrCodeImageUrl = await _blobs.SaveAsync(
-                $"qr/{ev.Id}/{ticketNumber}.png", png, "image/png", ct);
+                $"qr-codes/{ev.Id}/{ticketNumber}.png", png, "image/png", ct);
         }
 
         await _db.SaveChangesAsync(ct);

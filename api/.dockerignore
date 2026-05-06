@@ -8,3 +8,6 @@
 **/node_modules/
 Dockerfile
 .dockerignore
+# global.json pins a specific SDK for the host (.NET 9) but the build image
+# ships .NET 8. Excluding it lets the container use whichever SDK its base image has.
+global.json

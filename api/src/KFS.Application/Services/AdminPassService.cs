@@ -58,7 +58,7 @@ public class AdminPassService : IAdminPassService
                 null, seatsPerCode, qrExpiry));
 
             var png = _qr.RenderPng(pass.QrCodePayload);
-            pass.QrCodeImageUrl = await _blobs.SaveAsync($"qr/{ev.Id}/{ticket}.png", png, "image/png", ct);
+            pass.QrCodeImageUrl = await _blobs.SaveAsync($"qr-codes/{ev.Id}/{ticket}.png", png, "image/png", ct);
 
             passes.Add(pass);
             pdfEntries.Add(new PassPdfEntry(ticket, i, png, seatsPerCode, null));
@@ -73,7 +73,7 @@ public class AdminPassService : IAdminPassService
         {
             var pdfBytes = _pdf.RenderSheet(request.Type, ev.Name, ev.EventDate, pdfEntries);
             downloadUrl = await _blobs.SaveAsync(
-                $"batches/{ev.Id}/{batchId}.pdf", pdfBytes, "application/pdf", ct);
+                $"printable-batches/{ev.Id}/{batchId}.pdf", pdfBytes, "application/pdf", ct);
         }
         else
         {
@@ -88,7 +88,7 @@ public class AdminPassService : IAdminPassService
                 }
             }
             downloadUrl = await _blobs.SaveAsync(
-                $"batches/{ev.Id}/{batchId}.zip", ms.ToArray(), "application/zip", ct);
+                $"printable-batches/{ev.Id}/{batchId}.zip", ms.ToArray(), "application/zip", ct);
         }
 
         return new GeneratePassesResponse(batchId, request.Count, downloadUrl, request.Format);
