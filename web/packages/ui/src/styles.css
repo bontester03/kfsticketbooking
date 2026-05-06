@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply font-sans text-kfs-forest-700 bg-kfs-forest-50/40 antialiased; }
+  html[lang="ar"] body { @apply font-arabic; }
+}
+
+@layer components {
+  /* Buttons (KFS brand) */
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-semibold
+           transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-kfs-sage-500
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+  .btn-primary   { @apply btn bg-kfs-forest text-white hover:bg-kfs-forest-600; }
+  .btn-secondary { @apply btn bg-white text-kfs-forest ring-1 ring-kfs-sage-100 hover:bg-kfs-sage-50; }
+  .btn-accent    { @apply btn bg-kfs-gold text-white hover:bg-kfs-gold-600; }
+  .btn-danger    { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-ghost     { @apply btn text-kfs-forest hover:bg-kfs-sage-50; }
+
+  /* Form inputs */
+  .input {
+    @apply block w-full rounded-md border border-kfs-sage-100 bg-white px-3 py-2 text-sm
+           text-kfs-forest-700 placeholder:text-kfs-sage-500
+           focus:border-kfs-forest-500 focus:outline-none focus:ring-1 focus:ring-kfs-forest-500;
+  }
+  .label { @apply mb-1 block text-sm font-medium text-kfs-forest-700; }
+  .form-error { @apply mt-1 text-xs text-red-600; }
+
+  /* Cards / surfaces */
+  .surface { @apply rounded-md border border-kfs-sage-100 bg-white shadow-kfs-card; }
+  .card { @apply surface p-5; }
+
+  /* Seats — interactive grid styling consumed by <SeatGrid /> */
+  .seat-base {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded text-xs font-semibold
+           transition-colors select-none;
+  }
+  .seat-available { @apply seat-base bg-kfs-sage-100 text-kfs-forest hover:bg-kfs-sage-500 hover:text-white cursor-pointer; }
+  .seat-held      { @apply seat-base bg-kfs-gold-100 text-kfs-gold-700 cursor-not-allowed; }
+  .seat-booked    { @apply seat-base bg-kfs-forest text-kfs-forest-50 cursor-not-allowed; }
+  .seat-blocked   { @apply seat-base bg-neutral-300 text-neutral-600 cursor-not-allowed; }
+  .seat-selected  { @apply seat-base bg-kfs-gold text-white ring-2 ring-kfs-gold-700; }
+}

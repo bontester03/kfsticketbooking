@@ -1,0 +1,83 @@
+{
+  "app": {
+    "title": "حجز KFS",
+    "portal": "بوابة الطالب",
+    "admin": "لوحة الإدارة",
+    "scanner": "ماسح البوابة"
+  },
+  "auth": {
+    "signIn": "تسجيل الدخول",
+    "signOut": "تسجيل الخروج",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "currentPassword": "كلمة المرور الحالية",
+    "newPassword": "كلمة المرور الجديدة",
+    "confirmPassword": "تأكيد كلمة المرور",
+    "mustChangePassword": "يجب تغيير كلمة المرور قبل المتابعة.",
+    "wrongCredentials": "البريد أو كلمة المرور غير صحيحة.",
+    "save": "حفظ"
+  },
+  "nav": {
+    "dashboard": "الرئيسية",
+    "myBookings": "حجوزاتي",
+    "logout": "تسجيل الخروج"
+  },
+  "dashboard": {
+    "welcome": "أهلاً، {{name}}",
+    "noBooking": "لم تحجز مقاعد ولديك بعد.",
+    "cartActive": "لديك حجز مؤقت — متبقي {{remaining}}.",
+    "confirmed": "تم تأكيد حجزك.",
+    "bookNow": "حجز المقاعد",
+    "viewBooking": "عرض الحجز"
+  },
+  "groupSelect": {
+    "title": "اختر مجموعتك",
+    "subtitle": "اختر المجموعة A أو B. سيجلس الوالدان في نفس المجموعة.",
+    "groupA": "المجموعة A",
+    "groupB": "المجموعة B"
+  },
+  "sideSelect": {
+    "title": "اختر الجهة للبدء",
+    "subtitle": "اختر أي جهة — المقعد المقابل سيُحجز تلقائياً.",
+    "female": "الأم (نساء)",
+    "male":   "الأب (رجال)"
+  },
+  "seatMap": {
+    "title": "اختر مقعداً",
+    "available": "متاح",
+    "held": "محجوز مؤقتاً",
+    "booked": "محجوز",
+    "row": "الصف {{row}}",
+    "selectSeat": "اختيار المقعد {{label}}",
+    "mirrorPaired": "تم حجز كلا المقعدين {{label}} (الأم + الأب)."
+  },
+  "cart": {
+    "title": "السلة",
+    "expiresIn": "ينتهي الحجز خلال {{remaining}}",
+    "checkout": "تأكيد الحجز",
+    "release": "إلغاء الحجز",
+    "mother": "الأم — {{block}} {{seat}}",
+    "father": "الأب — {{block}} {{seat}}"
+  },
+  "confirmation": {
+    "title": "تم تأكيد الحجز",
+    "subtitle": "تم إرسال التذاكر إلى بريدك. أحضر رمز QR إلى البوابة.",
+    "viewBookings": "عرض الحجز"
+  },
+  "myBookings": {
+    "title": "حجزي",
+    "ticketNumber": "تذكرة #{{ticket}}",
+    "downloadQr": "تحميل QR",
+    "resendEmails": "إعادة إرسال البريد",
+    "cancel": "إلغاء الحجز",
+    "cancelConfirm": "بعد الإلغاء لديك {{minutes}} دقيقة لاختيار مقاعد بديلة. بعدها يُلغى التخصيص.",
+    "cancelKeep": "الإبقاء على الحجز",
+    "cancelProceed": "نعم، إلغاء"
+  },
+  "errors": {
+    "generic": "حدث خطأ. حاول مجدداً.",
+    "seatTaken": "المقعد لم يعد متاحاً — اختر مقعداً آخر.",
+    "cartExpired": "انتهى الحجز المؤقت. اختر مجدداً.",
+    "bookingClosed": "الحجز مغلق."
+  }
+}

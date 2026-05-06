@@ -34,15 +34,15 @@ Use this stack unless you hit a specific blocker (justify any deviation in `DECI
 - **PDF generation (printable QR sheets):** `QuestPDF`
 - **Excel parsing:** `ClosedXML` for student roster uploads
 - **Scanner camera:** `html5-qrcode` (must support iPad rear camera with mirror correction)
-- **Hosting target:** **Microsoft Azure**, all resources provisioned in the **UAE North (Dubai)** region for data residency:
+- **Hosting target:** **Microsoft Azure**. Primary deployment region: **UAE North (Dubai)** — chosen as the nearest GA Azure region to Riyadh, since **Azure Saudi Arabia East does not reach general availability until Q4 2026**. Plan a migration path to Saudi East when it opens. All resources provisioned together:
   - `api` → **Azure App Service for Linux** (.NET 8 stack), deployed from `/src/KFS.Api` Dockerfile (or built-in stack runtime — pick in `DECISIONS.md`).
   - `postgres` → **Azure Database for PostgreSQL — Flexible Server** (Burstable B2s tier is sufficient for a single-event load; scale up if running multiple events). Enable HA standby in same region for event day.
   - `portal` / `admin` / `scanner` → **Azure Static Web Apps** (one per frontend), with route-based API proxy back to the App Service.
 - **Object storage:** **Azure Blob Storage** account in UAE North for generated QR PNGs and printable PDF/ZIP outputs. Containers: `qr-codes`, `printable-batches`. Use Managed Identity from the App Service to access (no connection string in app config). Abstract behind `IBlobStorage`.
 - **Secrets:** **Azure Key Vault** in UAE North. App Service reads via Managed Identity. Never put secrets in App Settings except for Key Vault references (`@Microsoft.KeyVault(...)`).
 - **Containerisation:** `docker-compose.yml` for local dev (API + PostgreSQL 16 + **Azurite** as Azure Blob stand-in + frontend apps).
-- **Time zone:** application default is `Asia/Dubai` (UTC+4, no DST). All scheduled jobs (day-before reminder, cart sweeper) compute against this zone. Store all datetimes as `timestamptz` and convert to `Asia/Dubai` for UI, emails, and reports.
-- **Data residency:** keep all PII (student records, parent names, emails, QR payloads) inside UAE North. Do not enable cross-region replication for the database. If using Azure backup, configure UAE-only backup storage.
+- **Time zone:** application default is **`Asia/Riyadh`** (UTC+3, no DST — Saudi Arabia does not observe DST). All scheduled jobs (day-before reminder, cart sweeper) compute against this zone. Store all datetimes as `timestamptz` and convert to `Asia/Riyadh` for UI, emails, and reports.
+- **Data residency & compliance:** the school is in Riyadh, KSA — **Saudi Personal Data Protection Law (PDPL)** applies. Since hosting is in UAE North until Saudi East is GA, document a cross-border data transfer mechanism in `DECISIONS.md` (Saudi PDPL allows transfers to countries with adequate protection — UAE has reciprocal arrangements through GCC frameworks; confirm with the school's legal contact). Sign a Data Processing Addendum (DPA) with Microsoft. Disable cross-region replication beyond UAE/Saudi geography. Plan to migrate the Postgres + Blob + Key Vault to Saudi East once GA.
 
 **PostgreSQL-specific guidance for Claude Code:**
 - Use `snake_case` table and column naming via `UseSnakeCaseNamingConvention()` (EFCore.NamingConventions package), OR keep EF defaults — pick one and document in `DECISIONS.md`.
@@ -337,7 +337,200 @@ AuditLogs       (Id, ActorType, ActorId, Action,
 
 ---
 
-## 15. Admin Console — UI
+## 15. Frontend Architecture & Patterns
+
+This applies to all three React apps (`portal`, `admin`, `scanner`). Build them in a single **pnpm workspaces monorepo** under `/web` so they share a common UI library, API client, and types.
+
+### 15.1 Monorepo & Tooling
+
+- **Workspace manager:** pnpm with workspaces.
+- **Build tool:** Vite per app.
+- **Task runner:** **Turborepo** for caching builds, lints, tests across the three apps.
+- **Language:** TypeScript with `strict: true` and `noUncheckedIndexedAccess: true`.
+- **Linting:** ESLint with `@typescript-eslint`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y`. Prettier for formatting. Husky + lint-staged on commit.
+- **Node:** pinned via `.nvmrc` (Node 20 LTS).
+
+```
+/web
+  /apps
+    /portal               Student-facing
+    /admin                Admin console
+    /scanner              Scanner PWA
+  /packages
+    /ui                   Shared shadcn/ui components + design tokens
+    /api-client           Generated TS client from OpenAPI + auth interceptors
+    /types                Shared DTO types (also generated from OpenAPI)
+    /hooks                Shared React hooks (useAuth, useSeatMap, useSignalR)
+    /i18n                 Translation files + i18next setup
+    /utils                Date formatting (Asia/Riyadh), validation schemas
+  pnpm-workspace.yaml
+  turbo.json
+  tsconfig.base.json
+```
+
+### 15.2 Type-Safe API Client
+
+The .NET API exposes a Swagger / OpenAPI 3 spec at `/swagger/v1/swagger.json`. The `@packages/api-client` workspace runs **`openapi-typescript-codegen`** (or `orval`) at build time to generate:
+
+- Strongly-typed TypeScript request/response types.
+- A typed Axios-based client with auth interceptors (auto-attach JWT, auto-refresh on 401).
+
+Apps never write HTTP calls by hand — always go through the generated client. CI fails if the OpenAPI spec drifts from the committed types.
+
+### 15.3 State Management
+
+- **Server state:** **TanStack Query (React Query) v5** for all API data — handles caching, background refetch, optimistic updates, and pagination. Use query keys derived from API paths.
+- **Client / UI state:** **Zustand** for cross-component UI state (auth user, current cart hold, scanner offline queue). Avoid Redux — overkill for this scope.
+- **Form state:** **React Hook Form** with **Zod** schema validation. Share Zod schemas between apps where applicable (e.g. login schema). The Zod schemas should mirror the .NET FluentValidation rules so error messages stay consistent.
+- **Realtime:** **`@microsoft/signalr`** wrapped in a `useSeatMapHub` hook that exposes `useSyncExternalStore`-style subscriptions. The hook reconnects on visibility change and exposes `seatHeld`, `seatReleased`, `seatBooked` events. React Query `queryClient.setQueryData` is updated on each event so the UI never goes stale.
+
+### 15.4 Routing
+
+- **React Router v6** with code-split routes (`React.lazy` + Suspense).
+- Route-level auth guards: `<RequireAuth role="student" />` and `<RequireAuth role="admin" />` HOCs that read from the Zustand auth store.
+- Public routes: scanner page, login, password reset, password change.
+- Use `loader` + `action` patterns where they keep code clean, otherwise stick with React Query inside components.
+
+### 15.5 Authentication on the Client
+
+- **Access token (JWT, 15 min):** stored in **memory only** (Zustand store). Lost on refresh — that's fine; refresh token recovers it.
+- **Refresh token (7 days):** stored in an **HttpOnly, Secure, SameSite=Strict cookie** set by the API. Never accessible to JS.
+- **Refresh flow:** Axios response interceptor catches 401, calls `/auth/refresh`, retries the original request once. If refresh also 401s, redirect to login.
+- **Force password change:** if `MustChangePassword === true` in the JWT claims, redirect to a forced-change screen and block all other routes until done.
+- **Logout:** call `/auth/logout` (clears cookie server-side), then clear in-memory state and redirect.
+
+### 15.6 Internationalisation & RTL
+
+- **Library:** **i18next** + **react-i18next**.
+- **Languages:** English (`en`) and Arabic (`ar`). Default to Arabic for the student portal (school audience), English for admin (developer/staff audience), and Arabic for the scanner welcome message. Each app picks its default; user can switch via a header dropdown.
+- **RTL handling:** when language is `ar`, set `<html dir="rtl" lang="ar">` and `document.body.classList.add('rtl')`. Tailwind v3.3+ supports logical properties (`ps-` / `pe-` instead of `pl-` / `pr-`) — use those throughout to avoid manual mirroring.
+- **Numerals:** use Western Arabic numerals (1, 2, 3) for seat numbers — never Arabic-Indic — for clarity at the gate.
+- **Dates:** format via `Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Riyadh' })` for English, `ar-SA` for Arabic. Wrap in a `formatEventDate(date, locale)` util in `@packages/utils`.
+- **Email templates** (server-side) follow the same pattern: pick template by student's `PreferredLocale` field (default `ar`).
+
+### 15.7 Design System — KFS Brand
+
+The school's official brand guideline (`brand_guideline.pdf`) defines the palette and typography. Honour it in `@packages/ui` as Tailwind theme extensions.
+
+**Color palette** (from the brand book):
+
+| Role | Hex | Usage |
+|---|---|---|
+| **Primary — Forest** | `#0d3128` | Primary buttons, headers, navigation, ticket card text, "Block: VIP A" labels, brand-strong UI chrome |
+| **Secondary — Sage** | `#548b7d` | Secondary buttons, hover states, info chips, subtle backgrounds, secondary headings |
+| **Accent — Olive Gold** | `#a08b16` | Highlights, the "Category" badge on the ticket card, decorative accents, the school's heritage-feel |
+
+Tailwind config (`@packages/ui/tailwind.config.ts`):
+
+```ts
+colors: {
+  kfs: {
+    forest: { DEFAULT: '#0d3128', 50: '#f0f5f3', 100: '#dce9e5', 500: '#1d4f43', 600: '#163e34', 700: '#0d3128', 800: '#0a2620', 900: '#061814' },
+    sage:   { DEFAULT: '#548b7d', 50: '#f3f7f6', 100: '#e0eae7', 500: '#548b7d', 600: '#456f64', 700: '#365650' },
+    gold:   { DEFAULT: '#a08b16', 50: '#fbf8e9', 100: '#f5edc4', 500: '#a08b16', 600: '#806f12', 700: '#60530d' },
+  }
+}
+```
+
+**Semantic / status colors** — kept distinct from brand palette so a "valid scan" green doesn't get confused with KFS forest-green chrome:
+
+- **Success / valid scan:** `emerald-500` (`#10b981`) — bright, distinct from KFS forest.
+- **Warning / already-scanned:** **KFS gold** (`#a08b16`) — brand-aligned warning.
+- **Error / invalid:** `red-600` (`#dc2626`) — universal stop signal, kept neutral.
+
+**Typography** (from the brand book):
+
+- **English:** **Source Sans Variable** (Bold + Regular). Free, open source. Install via `@fontsource-variable/source-sans-3`. Apply as `font-sans` default in Tailwind.
+- **Arabic:** **Janna LT** (Bold + Regular) per the brand book. ⚠️ **This is a commercial Linotype/Monotype font, not free.** Decision required (capture in `DECISIONS.md`):
+  1. Acquire a Janna LT web font licence and self-host the WOFF2 files (preferred — preserves brand fidelity).
+  2. Use a free near-equivalent: **IBM Plex Sans Arabic** (`@fontsource/ibm-plex-sans-arabic`) or **Tajawal** (`@fontsource/tajawal`) — note the deviation in `DECISIONS.md` and flag for the school's approval.
+- Tailwind `fontFamily` config:
+  ```ts
+  fontFamily: {
+    sans:   ['"Source Sans 3 Variable"', 'system-ui', 'sans-serif'],
+    arabic: ['"Janna LT"', '"IBM Plex Sans Arabic"', 'Tahoma', 'sans-serif'], // graceful fallback
+  }
+  ```
+- Apply `font-arabic` automatically when `<html lang="ar">` is set.
+
+**Logo & marks:**
+
+- The brand book provides three logo lock-ups: full lock-up (Arabic + English wordmark + portrait emblem), Arabic-only, English-only. Place SVG copies under `@packages/ui/assets/logos/` and expose as `<KfsLogo variant="full|arabic|english|emblem" />`.
+- The "S" wave watermark is a recurring brand motif — use sparingly as a 5–10% opacity background on confirmation pages and email headers, not on every screen.
+
+**Tone & feel:**
+
+- Conservative, institutional, heritage-forward. Generous white space. Minimal ornamentation.
+- Rounded corners: `rounded-md` default, never large pill radii on primary surfaces.
+- Shadows: subtle (`shadow-sm` / `shadow-md`); avoid heavy modern drop-shadows.
+- Match the seriousness of the printed school communications, not a consumer SaaS aesthetic.
+
+**Domain components** (build once in `@packages/ui`, reuse everywhere):
+
+- `<TicketCard />` — visual ticket replicating the email layout, themed in KFS forest+gold.
+- `<SeatGrid />` — interactive SVG grid for VIP seat picking. Available seats in `kfs-sage-100`, held in `kfs-gold-100`, booked in `kfs-forest`, blocked in `neutral-300`.
+- `<SeatPair />` — read-only display showing the linked mother+father seats.
+- `<QrPreview />` — QR image with download/copy actions.
+- `<ZoneBadge />` — color-coded chip for VIP AF / VIP AM / VIP BF / VIP BM / Guest / Staff / Media / VVIP. Each zone gets a distinct shade derived from the KFS palette.
+- `<CountdownPill />` — for cart hold and re-book windows. Uses `kfs-gold` when over 1min remaining, `red-600` when under.
+- `<EmptyState />`, `<ErrorBoundary />`, `<LoadingPanel />` — required everywhere a query runs.
+- `<KfsLogo />` — props: `variant`, `monochrome`.
+- `<BrandWatermark />` — the "S" wave decorative motif at low opacity.
+
+### 15.8 Forms & Validation Patterns
+
+- Every form: React Hook Form + zodResolver + visible inline errors + disabled submit while pending.
+- File upload (Excel roster): drag-drop zone, preview first 10 parsed rows in a table, show server validation errors per row before final submit.
+- Optimistic UI for cart actions (add seat, remove seat) with rollback on server error.
+- Toast notifications via **sonner** for non-blocking feedback (success/error/info).
+
+### 15.9 Accessibility
+
+- All interactive elements keyboard-accessible.
+- Seat grid has both pointer and arrow-key navigation; current focus seat is announced via `aria-live="polite"`.
+- Colour is never the only signal — every status has an icon and label.
+- Target WCAG 2.1 AA contrast.
+- Test with `eslint-plugin-jsx-a11y` and a Lighthouse a11y check in CI.
+
+### 15.10 Scanner PWA Specifics
+
+- **Manifest** (`public/manifest.webmanifest`): standalone display, KFS branding, 192x192 + 512x512 icons.
+- **Service worker** via **Vite PWA plugin** (`vite-plugin-pwa`):
+  - Precache app shell.
+  - Runtime cache: scan endpoint with `NetworkFirst` strategy.
+- **Offline queue:** scans made while offline are stored in **IndexedDB via Dexie** in a `pending_scans` table. A background sync (or visibility-change handler) flushes the queue when online. UI shows a small "N scans pending sync" indicator.
+- **Camera handling:** `html5-qrcode` configured for rear camera (`facingMode: { exact: "environment" }`) with fallback to default. CSS `transform: scaleX(-1)` toggle button for iPad mirror correction. Audio cue via `Audio` API on each scan.
+- **Reduced motion:** respect `prefers-reduced-motion` for the success/fail flash animation.
+
+### 15.11 Performance
+
+- Route-based code splitting; each app's initial JS payload < 200 KB gzipped.
+- Image lazy-loading via native `loading="lazy"`.
+- React Query `staleTime` tuned per resource (seat map: 0 = always fresh; student profile: 5 min).
+- Memoise expensive seat grid renders with `React.memo` + stable seat keys.
+- Bundle analysis via `rollup-plugin-visualizer` checked into PR builds.
+
+### 15.12 Testing
+
+- **Unit / component:** **Vitest** + **React Testing Library**. Coverage target >=70% on shared packages.
+- **Integration:** Mock Service Worker (MSW) for API stubbing in tests.
+- **E2E:** **Playwright** in `/tests/e2e`. Critical flows:
+  - Student logs in, force-change password, picks seat, mirror auto-paired, checks out, downloads ticket.
+  - Two parallel students racing for the same seat (concurrency).
+  - Admin uploads Excel and student record appears.
+  - Admin generates Guest batch, scans one of the QRs, sees "Group of 3" message.
+- Visual regression on the `<TicketCard />` to lock in the email-matching layout.
+
+### 15.13 Build & Deploy
+
+- Each app: `pnpm --filter portal build` produces a static `dist/`.
+- **Azure Static Web Apps:** deploy each app independently via GitHub Actions; configure the SWA to proxy `/api/*` to the App Service.
+- **CSP headers** set via `staticwebapp.config.json`: only allow API + SignalR + Azure Blob origin.
+- **Environment variables:** `VITE_API_BASE_URL`, `VITE_SIGNALR_URL`, `VITE_SCANNER_TOKEN_KEY` — injected at build time per environment. No runtime env access in the browser bundle.
+
+---
+
+## 16. Admin Console — UI
 
 Pages required:
 
@@ -356,7 +549,7 @@ Pages required:
 
 ---
 
-## 16. Student Portal — UI
+## 17. Student Portal — UI
 
 - **Dashboard:** booking status (none / cart / confirmed / cancelled with re-book countdown), event details.
 - **Group Chooser:** "Pick your group: A or B" — once chosen and confirmed, locked for this booking.
@@ -370,7 +563,7 @@ Mobile-first. Arabic RTL support for any displayed Arabic text.
 
 ---
 
-## 17. Scanner Page — UI
+## 18. Scanner Page — UI
 
 Public URL: `/scan?token={eventScanToken}` (token issued by admin, time-limited).
 
@@ -378,7 +571,7 @@ Public URL: `/scan?token={eventScanToken}` (token issued by admin, time-limited)
 - **Critical:** handle iPad camera flip — when the rear camera feed is mirrored (front-camera mode), apply a CSS `transform: scaleX(-1)` correction. Provide a manual "Flip camera" button as fallback.
 - **Scan response display:**
   - ✅ Big green panel: "Welcome! Zone: {zone}, Seat: {seatLabel or 'General Seating'}, Holder: {name or 'Guest'}". For Guests: "Group of 3 — please admit 3 people."
-  - ⚠️ Amber: "Already scanned at {time}".
+  - ⚠️ **Gold (KFS warning):** "Already scanned at {time}".
   - ❌ Red: "Invalid / expired QR — direct to help desk".
 - Audio cue per state.
 - Offline-tolerant: queue scans in IndexedDB if network drops, sync when reconnected.
@@ -386,7 +579,7 @@ Public URL: `/scan?token={eventScanToken}` (token issued by admin, time-limited)
 
 ---
 
-## 18. Background Jobs
+## 19. Background Jobs
 
 Use Hangfire or `IHostedService`:
 
@@ -397,7 +590,7 @@ Use Hangfire or `IHostedService`:
 
 ---
 
-## 19. Security & Hardening
+## 20. Security & Hardening
 
 - Rate-limit all auth endpoints (`AspNetCoreRateLimit`).
 - HTTPS-only, HSTS, secure cookies.
@@ -412,7 +605,7 @@ Use Hangfire or `IHostedService`:
 
 ---
 
-## 20. Project Structure
+## 21. Project Structure
 
 ```
 /src
@@ -426,11 +619,19 @@ Use Hangfire or `IHostedService`:
   /KFS.Domain             Entities, value objects
   /KFS.Infrastructure     EF Core DbContext, migrations, repositories
   /KFS.Application        Use cases, DTOs, validators
-/web
-  /apps/portal            Student portal (React)
-  /apps/admin             Admin console (React)
-  /apps/scanner           Scanner PWA (React)
-  /packages/ui            Shared shadcn components
+/web                      pnpm workspaces monorepo (see section 15.1)
+  /apps/portal            Student portal (Vite + React)
+  /apps/admin             Admin console (Vite + React)
+  /apps/scanner           Scanner PWA (Vite + React + vite-plugin-pwa)
+  /packages/ui            Shared shadcn/ui + design tokens
+  /packages/api-client    OpenAPI-generated TS client + Axios interceptors
+  /packages/types         Shared DTO types
+  /packages/hooks         Shared React hooks (useAuth, useSeatMapHub, etc.)
+  /packages/i18n          i18next setup + en/ar translation files
+  /packages/utils         Date formatting (Asia/Riyadh), Zod schemas
+  pnpm-workspace.yaml
+  turbo.json
+  tsconfig.base.json
 /tests
   /KFS.Api.Tests
   /KFS.Application.Tests
@@ -444,7 +645,7 @@ DECISIONS.md
 
 ---
 
-## 21. Definition of Done
+## 22. Definition of Done
 
 - [ ] `docker-compose up` brings up API, **PostgreSQL 16**, **Azurite** (Azure Blob emulator), all 3 frontends locally.
 - [ ] Repository deploys cleanly to **Azure UAE North**: App Service (api), Postgres Flexible Server, Storage Account, Key Vault, three Static Web Apps (portal/admin/scanner). Healthchecks green and `/healthz` returns 200.
@@ -466,18 +667,18 @@ DECISIONS.md
 
 ---
 
-## 22. Build Order
+## 23. Build Order
 
-1. Domain models + EF migrations + venue seed (304 seats).
-2. Auth + admin Excel upload + student account provisioning.
-3. Seat map API + SignalR hub + paired-seat reserve transaction.
-4. Student cart + checkout + 2-ticket QR generation + email sending.
-5. Cancellation + re-book window logic.
-6. Admin "Generate Batch" for VVIP / Guest / Staff / Media (PDF + ZIP outputs).
-7. Reports (Group A / Group B exports).
-8. Reminders (unbooked + day-before).
-9. Scanner PWA with iPad camera handling.
-10. Admin dashboard + live seat map.
-11. Tests + Docker + CI.
+1. **Foundations:** Scaffold backend solution (.NET 8, EF Core, OpenAPI) AND frontend monorepo (pnpm workspaces, Turborepo, three Vite apps, shared packages, design tokens, i18n). Wire up the OpenAPI codegen pipeline so generated types flow into `@packages/api-client`. Set up `docker-compose.yml` with API + Postgres + Azurite.
+2. **Domain & seed:** Domain models + EF migrations + venue seed (304 seats). Build Bicep templates in `/infra` for UAE North.
+3. **Auth (full-stack):** Backend auth endpoints + student Excel upload + admin login. Frontend: login screens, force-password-change flow, auth Zustand store, Axios refresh interceptor in `@packages/api-client`. RequireAuth route guards.
+4. **Seat map (full-stack):** Seat map API + SignalR hub + paired-seat reserve transaction. Frontend: `<SeatGrid />` component with realtime updates via `useSeatMapHub`, group/side chooser, mirror-pair preview.
+5. **Booking flow (full-stack):** Cart + checkout + 2-ticket QR generation + email sending. Frontend: cart with countdown, checkout confirmation, "My Bookings" page with re-download/resend.
+6. **Cancellation + re-book window** (backend logic + frontend modal flow with countdown).
+7. **Admin "Generate Batch"** for VVIP / Guest / Staff / Media (PDF + ZIP outputs). Admin UI for batch list and re-download.
+8. **Reports & dashboard:** Group A / Group B exports + admin dashboard with live seat map view.
+9. **Reminders** (unbooked + day-before, with admin UI for triggering and templates).
+10. **Scanner PWA:** vite-plugin-pwa setup, camera handling with iPad mirror correction, IndexedDB offline queue, big visual feedback states.
+11. **Hardening:** Tests (Vitest, Playwright E2E covering paired-seat concurrency), accessibility audit, Lighthouse PWA check, Docker, GitHub Actions OIDC deploy to Azure UAE North.
 
 Start by scaffolding the solution, writing `DECISIONS.md` with your initial architectural choices, then proceed through the build order. Pause and ask only if a requirement is genuinely ambiguous; otherwise make the call and document it.

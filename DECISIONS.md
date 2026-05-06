@@ -1,12 +1,22 @@
 # DECISIONS — KFS Ticket Booking Platform
 
-This document captures every non-obvious architectural choice made while implementing [kfs_ticket_booking_prompt_v2 (1).md](kfs_ticket_booking_prompt_v2%20%281%29.md). Each entry: **what**, **why**, and **alternatives considered**.
+This document captures every non-obvious architectural choice made while implementing [kfs_ticket_booking_prompt_v2 (2).md](kfs_ticket_booking_prompt_v2%20%282%29.md). Each entry: **what**, **why**, and **alternatives considered**.
 
-## Hosting target: Azure UAE North
+## Hosting target: Azure UAE North (interim) → Saudi East (when GA)
 
-The school's data must stay in-region. Every PII-bearing resource (Postgres, Storage, Key Vault, App Insights, App Service) is provisioned in `uaenorth`. Static Web Apps is the one exception — it's not GA in UAE North as of writing, so the three frontends pin to `centralus`. SWAs serve only static assets (no PII), so this is acceptable; documented here so a reviewer doesn't need to chase it.
+KFS is in Riyadh; Saudi PDPL applies. Saudi East is not GA until Q4 2026, so the platform deploys to **UAE North** today. Cross-border transfer rationale (UAE↔KSA reciprocity through GCC frameworks) is a legal-team decision documented separately; the Bicep templates make a Saudi-East migration a parameter swap once available — every PII-bearing resource is parameterised on `location`.
+
+Every PII-bearing resource (Postgres, Storage, Key Vault, App Insights, App Service) is provisioned in `uaenorth`. **Static Web Apps** is the one exception — not GA in UAE North as of writing, so the three frontends pin to `centralus`. SWAs serve only static JS/CSS/HTML (no PII), so this is acceptable; flagged here so a reviewer doesn't need to chase it.
 
 The full deployment is captured in [infra/main.bicep](infra/main.bicep) and per-env parameter files. CI deploys via OIDC federated credentials — see [.github/workflows/deploy.yml](.github/workflows/deploy.yml). No long-lived service principal secrets.
+
+## Time zone: Asia/Riyadh (UTC+3, no DST)
+
+KFS is in Riyadh, not Dubai. Two notable consequences:
+
+- **`KfsTime`** ([api/src/KFS.Application/Common/KfsTime.cs](api/src/KFS.Application/Common/KfsTime.cs)) resolves to `Asia/Riyadh` first, then the Windows id `Arab Standard Time` (NOT `Arabian Standard Time`, which is `Asia/Dubai`/UTC+4). Two letters, one hour, easy to miss — there's a comment in the code.
+- **App Service** sets `WEBSITE_TIME_ZONE=Arab Standard Time` (the spec text in v2(2) section 2 still says "Arabian Standard Time", which is internally inconsistent with the spec's own `Asia/Riyadh` directive — corrected here and the Bicep template).
+- **Frontend formatting** uses `Intl.DateTimeFormat('en-GB' | 'ar-SA-u-nu-latn', { timeZone: 'Asia/Riyadh' })` via [`@kfs/utils`](web/packages/utils/src/index.ts). The `-u-nu-latn` extension forces Western Arabic numerals (1, 2, 3) even in the Arabic locale — per spec section 15.6, gate scanners must read "A12" not "أ١٢".
 
 ## Stack
 
@@ -25,9 +35,8 @@ Tables and columns are snake_case (`booking_items`, `qr_code_payload`). The spec
 ### Postgres extensions
 Declared in `OnModelCreating` and emitted into the initial migration: `citext`, `pgcrypto`, `pg_trgm`. The Bicep template enables them via the `azure.extensions` server parameter so the migration applies cleanly in Azure.
 
-### Time zone: Asia/Dubai (UTC+4, no DST)
-Stored everywhere as UTC; rendered as Asia/Dubai for emails, reports, UI. [`KfsTime`](api/src/KFS.Application/Common/KfsTime.cs) is a static helper with a `FormatLocal` extension on `DateTime`. Resolves the IANA id on Linux and the Windows id on Windows hosts; falls back to a custom +4 zone if neither is available (covers trimmed Alpine images).
-**App Service**: `WEBSITE_TIME_ZONE=Arabian Standard Time` is set in App Settings so any direct `DateTime.Now` calls (none today, but defensive) also resolve to Dubai.
+### Time zone implementation
+See the top-level "Time zone: Asia/Riyadh" section. [`KfsTime`](api/src/KFS.Application/Common/KfsTime.cs) is a static helper with a `FormatLocal` extension on `DateTime`. Resolves the IANA id on Linux and the Windows id on Windows hosts; falls back to a custom UTC+3 zone if neither is available (covers trimmed Alpine images).
 
 ### Concurrency: Serializable + SELECT FOR UPDATE + 40001 retry
 The paired-seat reservation runs inside `IsolationLevel.Serializable`, **and** explicitly takes a row lock on both target seat rows with `SELECT 1 FROM seats WHERE id = ANY(...) FOR UPDATE` before the conflict check. If Postgres aborts the transaction with SQLState `40001` (serialization_failure), the service catches it, clears the change tracker, and retries once. After two attempts a conflict surfaces as `409 seat_taken` so the portal refreshes the seat map via SignalR.
@@ -46,6 +55,69 @@ Single-instance scale today. For event day with ~600 concurrent users (per spec)
 
 ### Application Insights
 `AddApplicationInsightsTelemetry()` reads `APPLICATIONINSIGHTS_CONNECTION_STRING` from env. Set automatically by the Bicep template via `appInsights.outputs.connectionString`. No-op locally without the env var.
+
+## Frontend architecture (v2 (2) section 15)
+
+### Monorepo: pnpm workspaces + Turborepo
+[web/](web/) is a pnpm workspace with three apps (`portal`, `admin`, `scanner`) and five shared packages (`ui`, `api-client`, `types`, `utils`, `i18n`). Turborepo orchestrates `build`/`lint`/`typecheck` across them with caching. Node 20 LTS pinned via `.nvmrc`.
+
+**Why pnpm**: hoisted-by-default lockfiles + workspace `workspace:*` references that resolve at build without a publish step. npm workspaces would also work; pnpm's stricter dependency boundaries catch peer-dep mistakes earlier.
+
+### Shared packages source-only — no build step
+Packages export `.ts/.tsx` directly via `"main": "src/index.ts"`. Apps consume them and Vite handles the TypeScript. Avoids the cycle of "rebuild the lib before the app sees changes."
+
+### KFS brand tokens — Forest / Sage / Gold
+Per spec section 15.7, the KFS palette lives in [`@kfs/ui/tailwind-preset.cjs`](web/packages/ui/tailwind-preset.cjs):
+
+| Token | Hex | Use |
+|---|---|---|
+| `kfs-forest` | `#0d3128` | Primary buttons, headers, ticket card chrome |
+| `kfs-sage` | `#548b7d` | Secondary surfaces, hover states, info chips |
+| `kfs-gold` | `#a08b16` | Accents, "category" badges, warning state for already-scanned QR |
+
+Each app pulls the preset via `presets: [require('@kfs/ui/tailwind-preset')]`.
+
+### Fonts: Source Sans 3 (English) + IBM Plex Sans Arabic (Arabic)
+Spec section 15.7 prefers **Janna LT** for Arabic — but Janna LT is a **paid** Linotype/Monotype font. Decision (option 2 in the spec): ship with **IBM Plex Sans Arabic** (free, similar institutional feel) so the project boots out of the box without a font-licensing blocker. The school can swap to Janna LT later by:
+
+1. Acquiring a Janna LT web licence and dropping the WOFF2 files into `web/packages/ui/src/fonts/`.
+2. Adding the `@font-face` declarations.
+3. Putting `'"Janna LT"'` in front of IBM Plex in the `font-arabic` array in the Tailwind preset.
+
+Both English (Source Sans 3 Variable, free, `@fontsource-variable/source-sans-3`) and Arabic IBM Plex (`@fontsource/ibm-plex-sans-arabic`) are bundled into each app at build time.
+
+### State management
+- **Server state**: TanStack Query v5. Query keys named `['events', 'active']`, `['seatmap', eventId, group]`, `['bookings']`, `['cart']` — derived from path so refactors are mechanical.
+- **Auth state**: Zustand store in `@kfs/api-client` ([`useAuthStore`](web/packages/api-client/src/auth-store.ts)). Persisted to `localStorage` for now (see "Refresh tokens" below).
+- **Forms**: React Hook Form + Zod. Login + change-password schemas mirror the FluentValidation rules on the backend.
+
+### Refresh tokens — deviation from spec 15.5
+The spec calls for refresh tokens in HttpOnly cookies; the backend currently issues them in the JSON body. We persist both tokens to `localStorage` for now and document this as a follow-up that requires **backend changes**:
+
+- Add a Set-Cookie header on `/auth/login` and `/auth/refresh`.
+- Read the refresh cookie automatically on `/auth/refresh` (drop the request-body field).
+- Update the Axios interceptor to call `/auth/refresh` with `withCredentials: true` and no body.
+
+Functionally equivalent today; the cookie approach simply prevents an XSS-stealing-localStorage attack class. Captured as a real (not just bookkeeping) follow-up.
+
+### i18n: i18next with Arabic default + RTL
+[`@kfs/i18n`](web/packages/i18n/src/index.ts) ships with `en` and `ar` translation bundles and toggles `<html dir="rtl|ltr">` on language change. Defaults per app:
+
+- **Portal** → Arabic (school audience)
+- **Admin** → English (school staff + technical users)
+- **Scanner** → English UI, Arabic + English welcome lines on the result screen
+
+Tailwind v3.3+ logical properties (`ps-*` / `pe-*` / `me-*`) are used throughout the components in `@kfs/ui` so RTL doesn't require manual mirroring.
+
+### What's deferred from spec section 15
+- **OpenAPI codegen**: spec wants `openapi-typescript-codegen` or `orval` generating types + axios client. Today `@kfs/types` and `@kfs/api-client` are hand-maintained — quick to write, easy to drift. Migration is purely additive: drop a `pnpm openapi:generate` script and re-export.
+- **SignalR client (`@microsoft/signalr`)**: hub exists on the backend, frontend hook does not yet — the seat picker re-fetches on action instead of receiving live `seat-changed` events. Documented; user-visible effect is one extra second of staleness if two students pick simultaneously.
+- **shadcn/ui**: spec calls for the full shadcn component library; we shipped a small hand-rolled set in `@kfs/ui` styled to the brand. shadcn can be layered on top later — its components are "copy into your repo" rather than "install from npm" so adding it is non-disruptive.
+- **Vite PWA plugin** (scanner offline queue, IndexedDB via Dexie, `prefers-reduced-motion`): the scanner is a placeholder shell. Camera + offline queue land in the next pass.
+- **Husky / lint-staged / prettier**: not wired up yet. CI runs `tsc --noEmit` + the build, which catches type errors; ESLint + format gates land later.
+
+### Frontend Docker images
+One [web/Dockerfile](web/Dockerfile) with a `APP=portal|admin|scanner` build-arg. Multi-stage: `node:20-alpine` to install + build the chosen app, `nginx:1.27-alpine` to serve the static `dist/`. Each app has its own `nginx.conf` that proxies `/api/` and `/hubs/` to the API container — same pattern Azure SWA uses, so the local dev experience matches the cloud topology.
 
 ### IHostedService over Hangfire
 **Why**: Spec said "Hangfire or IHostedService". IHostedService + `PeriodicTimer` is built-in, requires no extra dashboard infra, and the three jobs we need (cart sweeper, rebook expirer, day-before reminder) don't need durable retries beyond what we add inside the loops. A single Hangfire dependency is overkill.

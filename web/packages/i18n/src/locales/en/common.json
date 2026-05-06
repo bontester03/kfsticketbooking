@@ -1,0 +1,83 @@
+{
+  "app": {
+    "title": "KFS Booking",
+    "portal": "Student Portal",
+    "admin": "Admin Console",
+    "scanner": "Gate Scanner"
+  },
+  "auth": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "email": "Email",
+    "password": "Password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "mustChangePassword": "You must change your password before continuing.",
+    "wrongCredentials": "Email or password is incorrect.",
+    "save": "Save"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "myBookings": "My bookings",
+    "logout": "Logout"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "noBooking": "You have not booked your parents' seats yet.",
+    "cartActive": "You have a cart hold — {{remaining}} remaining.",
+    "confirmed": "Your booking is confirmed.",
+    "bookNow": "Book seats",
+    "viewBooking": "View my booking"
+  },
+  "groupSelect": {
+    "title": "Pick your group",
+    "subtitle": "Choose Group A or Group B. Your mother and father will sit in the same group.",
+    "groupA": "Group A",
+    "groupB": "Group B"
+  },
+  "sideSelect": {
+    "title": "Pick a side to start",
+    "subtitle": "Choose either side — the matching seat on the opposite side is reserved automatically.",
+    "female": "Female (Mother)",
+    "male":   "Male (Father)"
+  },
+  "seatMap": {
+    "title": "Pick a seat",
+    "available": "Available",
+    "held": "Held",
+    "booked": "Booked",
+    "row": "Row {{row}}",
+    "selectSeat": "Select seat {{label}}",
+    "mirrorPaired": "Both side {{label}} reserved (mother + father)."
+  },
+  "cart": {
+    "title": "Your cart",
+    "expiresIn": "Hold expires in {{remaining}}",
+    "checkout": "Confirm booking",
+    "release": "Release seats",
+    "mother": "Mother — {{block}} {{seat}}",
+    "father": "Father — {{block}} {{seat}}"
+  },
+  "confirmation": {
+    "title": "Booking confirmed",
+    "subtitle": "Tickets sent to your KFS email. Bring the QR codes to the gate.",
+    "viewBookings": "View my booking"
+  },
+  "myBookings": {
+    "title": "My booking",
+    "ticketNumber": "Ticket #{{ticket}}",
+    "downloadQr": "Download QR",
+    "resendEmails": "Resend emails",
+    "cancel": "Cancel booking",
+    "cancelConfirm": "After cancelling you have {{minutes}} minutes to pick replacement seats. After that your allocation is forfeited.",
+    "cancelKeep": "Keep booking",
+    "cancelProceed": "Yes, cancel"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "seatTaken": "That seat is no longer available — please pick another.",
+    "cartExpired": "Your cart hold expired. Please pick again.",
+    "bookingClosed": "Booking is closed."
+  }
+}

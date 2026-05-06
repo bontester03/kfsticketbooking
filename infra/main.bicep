@@ -133,7 +133,7 @@ module appService 'modules/app-service.bicep' = {
     sku: appServiceSku
     appSettings: {
       ASPNETCORE_ENVIRONMENT: env == 'prod' ? 'Production' : 'Staging'
-      WEBSITE_TIME_ZONE: 'Arabian Standard Time'
+      WEBSITE_TIME_ZONE: 'Arab Standard Time'
       Database__RunMigrationsOnStartup: 'true'
       Swagger__Enabled: env == 'prod' ? 'false' : 'true'
       Storage__Provider: 'AzureBlob'

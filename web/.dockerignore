@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.cache
+**/.parcel-cache
+**/coverage
+.git
+**/*.log
+.DS_Store

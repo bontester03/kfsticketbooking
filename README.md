@@ -4,9 +4,10 @@ Reference implementation of [kfs_ticket_booking_prompt_v2 (1).md](kfs_ticket_boo
 
 > **Build status (this commit)**
 > - ✅ Backend: complete (.NET 8 + EF Core + PostgreSQL via Npgsql, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
-> - 🟡 Frontends (`portal`, `admin`, `scanner`): not in this commit — backend APIs are stable so they can plug in next pass
-> - 🟡 Tests: structure scaffolded; concurrency tests next pass
-> - 🟡 Azure CI: pending; Railway deploy is the documented path
+> - ✅ **Portal** (student-facing): complete — login, force-password-change, group/side picker, seat picker, cart with countdown, my bookings with branded ticket card, KFS forest/sage/gold theme, i18next ar/en + RTL, Asia/Riyadh date formatting
+> - 🟡 **Admin** & **Scanner** apps: shells exist; full pages land in subsequent passes
+> - 🟡 Tests: structure scaffolded; concurrency + frontend tests next pass
+> - ✅ Azure CI: GitHub Actions OIDC deploy to UAE North via Bicep templates in `/infra/`
 
 ## Architecture
 
@@ -24,9 +25,15 @@ KFS/
 │   └── tests/
 │       └── KFS.Tests/                xUnit + FluentAssertions
 │
-├── docker-compose.yml                api + postgres
+├── web/                              pnpm workspace (Vite + React + Tailwind)
+│   ├── apps/portal                   Student portal (Arabic default, RTL)
+│   ├── apps/admin                    Admin console (English default) — shell only this pass
+│   ├── apps/scanner                  Gate scanner PWA — shell only this pass
+│   └── packages/{ui,api-client,types,utils,i18n}
+├── infra/                            Bicep templates for Azure UAE North
+├── docker-compose.yml                api + postgres + azurite + portal + admin + scanner
 ├── DECISIONS.md                      every non-obvious architectural choice
-├── kfs_ticket_booking_prompt_v2.md   the source spec
+├── kfs_ticket_booking_prompt_v2 (2).md   the source spec (current)
 └── .env.example                      copy → .env
 ```
 
@@ -46,6 +53,15 @@ KFS/
 | Background jobs      | `IHostedService` + `PeriodicTimer` (cart sweeper, rebook expirer, day-before reminder)|
 | Logging              | Serilog (console + rolling file)                                                      |
 | API docs             | Swashbuckle / OpenAPI                                                                 |
+| Web monorepo         | pnpm workspaces + Turborepo                                                           |
+| Web framework        | Vite + React 18 + TypeScript                                                          |
+| Server state         | TanStack Query v5                                                                     |
+| Client state         | Zustand (auth)                                                                        |
+| Forms                | React Hook Form + Zod                                                                 |
+| i18n                 | i18next + react-i18next; English + Arabic with RTL                                    |
+| Brand tokens         | KFS forest `#0d3128` / sage `#548b7d` / gold `#a08b16`                                |
+| Fonts                | Source Sans 3 Variable (English) + IBM Plex Sans Arabic (Arabic; Janna LT swap path documented in DECISIONS.md) |
+| Time zone            | Asia/Riyadh everywhere (Windows id `Arab Standard Time`, NOT `Arabian Standard Time`) |
 
 ## Quick start (Docker)
 
@@ -55,12 +71,16 @@ cp .env.example .env
 docker compose up --build
 ```
 
-| Service       | URL / port                             |
-| ------------- | -------------------------------------- |
-| API           | http://localhost:5080/api/v1           |
-| Swagger       | http://localhost:5080/swagger          |
-| SignalR       | ws://localhost:5080/hubs/seatmap       |
-| PostgreSQL    | localhost:5432 (kfs / `POSTGRES_PASSWORD`) |
+| Service       | URL / port                                 |
+| ------------- | ------------------------------------------ |
+| **Portal**    | <http://localhost:5173>                    |
+| **Admin**     | <http://localhost:5174>                    |
+| **Scanner**   | <http://localhost:5175>                    |
+| API           | <http://localhost:5080/api/v1>             |
+| Swagger       | <http://localhost:5080/swagger>            |
+| SignalR       | `ws://localhost:5080/hubs/seatmap`         |
+| PostgreSQL    | `localhost:5432` (kfs / `POSTGRES_PASSWORD`) |
+| Azurite       | <http://localhost:10000/devstoreaccount1>  |
 
 The first start runs EF Core migrations and seeds: 1 active event, 8 zones, 304 VIP seats, 1 super-admin (`admin@kfs.sch.sa`), 5 sample students.
 
@@ -77,7 +97,20 @@ The first start runs EF Core migrations and seeds: 1 active event, 8 zones, 304 
 
 All accounts are flagged `MustChangePassword = true`.
 
-## Local development (no Docker)
+## Frontend dev (no Docker, hot reload)
+
+```bash
+cd web
+corepack enable && corepack prepare pnpm@9.7.0 --activate   # one-time
+pnpm install
+pnpm --filter portal dev    # http://localhost:5173
+pnpm --filter admin dev     # http://localhost:5174
+pnpm --filter scanner dev   # http://localhost:5175
+```
+
+Each Vite dev server proxies `/api` and `/hubs` to `http://localhost:5080` (the API container or `dotnet run`). Brand tokens (forest/sage/gold) live in [`web/packages/ui/tailwind-preset.cjs`](web/packages/ui/tailwind-preset.cjs); fonts bundled via `@fontsource-variable/source-sans-3` (English) and `@fontsource/ibm-plex-sans-arabic` (Arabic) — see [DECISIONS.md](DECISIONS.md) on the Janna LT swap path.
+
+## Backend dev (no Docker)
 
 ```bash
 # Start a local Postgres (any way you like). Easiest is Docker:

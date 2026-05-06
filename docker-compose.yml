@@ -44,7 +44,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
-      WEBSITE_TIME_ZONE: Arabian Standard Time
+      WEBSITE_TIME_ZONE: Arab Standard Time
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-kfs};Username=${POSTGRES_USER:-kfs};Password=${POSTGRES_PASSWORD:-kfs}"
       Jwt__Issuer: ${JWT_ISSUER:-kfs}
       Jwt__Audience: ${JWT_AUDIENCE:-kfs-clients}
@@ -70,6 +70,39 @@ services:
       - api-logs:/app/logs
     networks:
       - kfs
+
+  portal:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args: { APP: portal }
+    container_name: kfs-portal
+    depends_on: [api]
+    ports:
+      - "${PORTAL_PORT:-5173}:80"
+    networks: [kfs]
+
+  admin:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args: { APP: admin }
+    container_name: kfs-admin
+    depends_on: [api]
+    ports:
+      - "${ADMIN_PORT:-5174}:80"
+    networks: [kfs]
+
+  scanner:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args: { APP: scanner }
+    container_name: kfs-scanner
+    depends_on: [api]
+    ports:
+      - "${SCANNER_PORT:-5175}:80"
+    networks: [kfs]
 
 volumes:
   postgres-data:
