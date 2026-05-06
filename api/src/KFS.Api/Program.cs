@@ -15,8 +15,14 @@ using Serilog;
 
 QuestPDF.Settings.License = LicenseType.Community;
 
+// Npgsql 6+ rejects DateTime.Kind=Unspecified by default. The codebase uses UTC consistently
+// for time-of-event values, but DateOfBirth (a calendar-only field) is loaded as Unspecified.
+// Enabling the legacy switch keeps that just-works without per-property column-type wrangling.
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
+NormalizeConnectionString(builder);
 NormalizePort(builder);
 
 builder.Host.UseSerilog((ctx, services, cfg) => cfg
@@ -107,6 +113,35 @@ static void NormalizePort(WebApplicationBuilder builder)
     var port = Environment.GetEnvironmentVariable("PORT");
     if (string.IsNullOrWhiteSpace(port)) return;
     builder.WebHost.UseUrls($"http://+:{port}");
+}
+
+// Translate Railway/Heroku-style DATABASE_URL (postgres://user:pass@host:port/db) into the
+// Npgsql key=value format. If DATABASE_URL is absent, the appsettings value passes through.
+static void NormalizeConnectionString(WebApplicationBuilder builder)
+{
+    var raw = Environment.GetEnvironmentVariable("DATABASE_URL");
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        var existing = builder.Configuration.GetConnectionString("Default");
+        if (string.IsNullOrWhiteSpace(existing)) return;
+        if (!existing.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            && !existing.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+            return;
+        raw = existing;
+    }
+
+    var uri = new Uri(raw);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var csb = new Npgsql.NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port == -1 ? 5432 : uri.Port,
+        Username = Uri.UnescapeDataString(userInfo[0]),
+        Password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : null,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        SslMode = Npgsql.SslMode.Prefer
+    };
+    builder.Configuration["ConnectionStrings:Default"] = csb.ConnectionString;
 }
 
 public partial class Program { }

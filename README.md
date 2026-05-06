@@ -3,7 +3,7 @@
 Reference implementation of [kfs_ticket_booking_prompt_v2.md](kfs_ticket_booking_prompt_v2.md). For every architectural choice see [DECISIONS.md](DECISIONS.md).
 
 > **Build status (this commit)**
-> - ✅ Backend: complete (.NET 8 + EF Core + SQL Server, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
+> - ✅ Backend: complete (.NET 8 + EF Core + PostgreSQL via Npgsql, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
 > - 🟡 Frontends (`portal`, `admin`, `scanner`): not in this commit — backend APIs are stable so they can plug in next pass
 > - 🟡 Tests: structure scaffolded; concurrency tests next pass
 > - 🟡 Azure CI: pending; Railway deploy is the documented path
@@ -17,14 +17,14 @@ KFS/
 │   ├── src/
 │   │   ├── KFS.Domain/               Entities, enums (no dependencies)
 │   │   ├── KFS.Application/          DTOs, service contracts + implementations, validators
-│   │   ├── KFS.Infrastructure/       EF Core SQL Server, JWT, QR (QRCoder), PDF (QuestPDF),
+│   │   ├── KFS.Infrastructure/       EF Core Npgsql, JWT, QR (QRCoder), PDF (QuestPDF),
 │   │   │                             Excel (ClosedXML), email, blob storage, seeding
 │   │   └── KFS.Api/                  Controllers, SignalR hubs, IHostedService jobs,
 │   │                                 middleware, Program.cs, settings
 │   └── tests/
 │       └── KFS.Tests/                xUnit + FluentAssertions
 │
-├── docker-compose.yml                api + sqlserver
+├── docker-compose.yml                api + postgres
 ├── DECISIONS.md                      every non-obvious architectural choice
 ├── kfs_ticket_booking_prompt_v2.md   the source spec
 └── .env.example                      copy → .env
@@ -35,7 +35,7 @@ KFS/
 | Concern              | Choice                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | API                  | ASP.NET Core 8, C# 12                                                                 |
-| Persistence          | SQL Server 2022, EF Core 8 (`Microsoft.EntityFrameworkCore.SqlServer`), code-first    |
+| Persistence          | PostgreSQL 16, EF Core 8 (`Npgsql.EntityFrameworkCore.PostgreSQL`), code-first migrations |
 | Real-time            | SignalR (`/hubs/seatmap`)                                                             |
 | Auth                 | JWT (15-min access, 7-day refresh, hashed in DB), BCrypt password hashing             |
 | Validation           | FluentValidation                                                                      |
@@ -60,7 +60,7 @@ docker compose up --build
 | API           | http://localhost:5080/api/v1           |
 | Swagger       | http://localhost:5080/swagger          |
 | SignalR       | ws://localhost:5080/hubs/seatmap       |
-| SQL Server    | localhost:1433 (sa / `MSSQL_SA_PASSWORD`) |
+| PostgreSQL    | localhost:5432 (kfs / `POSTGRES_PASSWORD`) |
 
 The first start runs EF Core migrations and seeds: 1 active event, 8 zones, 304 VIP seats, 1 super-admin (`admin@kfs.sch.sa`), 5 sample students.
 
@@ -80,17 +80,33 @@ All accounts are flagged `MustChangePassword = true`.
 ## Local development (no Docker)
 
 ```bash
-# Start a local SQL Server (any way you like). Easiest is Docker:
-docker run --name kfs-sql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer \
-  -e MSSQL_SA_PASSWORD=KfsBooking!2024 -p 1433:1433 \
-  -d mcr.microsoft.com/mssql/server:2022-latest
+# Start a local Postgres (any way you like). Easiest is Docker:
+docker run --name kfs-pg -e POSTGRES_PASSWORD=kfs -e POSTGRES_USER=kfs \
+  -e POSTGRES_DB=kfs -p 5432:5432 -d postgres:16-alpine
 
 cd api
 dotnet restore
+
+# First-time setup: generate the initial migration. The seeder gracefully falls back to
+# EnsureCreated if you skip this, but committing migrations is the supported flow.
+dotnet ef migrations add InitialCreate \
+    --project src/KFS.Infrastructure \
+    --startup-project src/KFS.Api
+
 dotnet run --project src/KFS.Api
 ```
 
-Open http://localhost:5080/swagger.
+Open http://localhost:5080/swagger. Subsequent migrations:
+
+```bash
+dotnet ef migrations add <Name> \
+    --project src/KFS.Infrastructure \
+    --startup-project src/KFS.Api
+
+dotnet ef database update \
+    --project src/KFS.Infrastructure \
+    --startup-project src/KFS.Api
+```
 
 ## REST endpoints (all under `/api/v1`)
 
@@ -126,7 +142,7 @@ Open http://localhost:5080/swagger.
 
 | Variable                  | Notes                                                         |
 | ------------------------- | ------------------------------------------------------------- |
-| `ConnectionStrings__Default` | SQL Server connection string                              |
+| `ConnectionStrings__Default` | PostgreSQL key=value string (or set `DATABASE_URL` and the API translates it) |
 | `Jwt__Secret`             | ≥32 chars, never commit                                       |
 | `Qr__SigningKey`          | ≥32 chars, **separate** from `Jwt__Secret`                    |
 | `Auth__SuperAdminPassword`| Initial super-admin password (only used on first boot)        |
@@ -139,8 +155,8 @@ Open http://localhost:5080/swagger.
 1. Push the repo to GitHub.
 2. In Railway → **New Project → Deploy from GitHub repo** → pick `bontester03/kfsticketbooking`.
 3. The first service is the API: set **Root Directory = `api`**. Railway picks up [api/Dockerfile](api/Dockerfile) + [api/railway.json](api/railway.json).
-4. **+ Add Database → SQL Server** (or Azure SQL externally — set `ConnectionStrings__Default` directly).
-5. On the api service → **Variables**, paste the env list above. For Railway's SQL Server plugin, the connection string format is `Server=${{ MSSQL.MSSQLHOST }},${{ MSSQL.MSSQLPORT }};Database=${{ MSSQL.MSSQLDATABASE }};User Id=${{ MSSQL.MSSQLUSER }};Password=${{ MSSQL.MSSQLPASSWORD }};TrustServerCertificate=true;Encrypt=false`.
+4. **+ Add Database → PostgreSQL** — Railway exposes `DATABASE_URL` automatically.
+5. On the api service → **Variables**, set `DATABASE_URL=${{ Postgres.DATABASE_URL }}`. The API parses the URL into Npgsql key=value form on startup ([Program.cs](api/src/KFS.Api/Program.cs) → `NormalizeConnectionString`). Add the `Jwt__Secret`, `Qr__SigningKey`, etc. from the env list above.
 6. **Settings → Networking → Generate Domain** to get the public API URL.
 7. Push to `main`. The API auto-deploys, runs migrations, and seeds.
 

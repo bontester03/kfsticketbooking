@@ -23,8 +23,8 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
         services.AddDbContext<KfsDbContext>(opt =>
-            opt.UseSqlServer(connectionString, sql =>
-                sql.MigrationsAssembly(typeof(KfsDbContext).Assembly.FullName)));
+            opt.UseNpgsql(connectionString, npg =>
+                npg.MigrationsAssembly(typeof(KfsDbContext).Assembly.FullName)));
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<KfsDbContext>());
 

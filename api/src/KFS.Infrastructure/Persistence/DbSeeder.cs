@@ -3,6 +3,8 @@ using KFS.Application.Services;
 using KFS.Domain.Entities;
 using KFS.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,7 +21,21 @@ public static class DbSeeder
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DbSeeder");
 
-        await db.Database.MigrateAsync();
+        // Prefer migrations once they exist; on a fresh checkout (no migrations yet) fall back to
+        // EnsureCreated so the API boots and seeds without forcing the operator to run
+        // `dotnet ef migrations add` first. Switch to MigrateAsync exclusively as soon as you
+        // commit the first migration.
+        var migrationsAssembly = db.GetService<IMigrationsAssembly>();
+        if (migrationsAssembly.Migrations.Any())
+        {
+            await db.Database.MigrateAsync();
+        }
+        else
+        {
+            logger.LogWarning("No EF migrations detected; falling back to EnsureCreated. " +
+                              "Run `dotnet ef migrations add InitialCreate ...` and redeploy.");
+            await db.Database.EnsureCreatedAsync();
+        }
 
         if (!await db.Admins.AnyAsync())
         {

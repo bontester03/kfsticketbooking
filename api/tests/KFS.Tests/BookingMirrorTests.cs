@@ -1,6 +1,7 @@
 using FluentAssertions;
 using KFS.Application.Services;
 using KFS.Domain.Enums;
+using Xunit;
 
 namespace KFS.Tests;
 

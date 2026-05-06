@@ -116,8 +116,9 @@ public class BookingItemConfiguration : IEntityTypeConfiguration<BookingItem>
 
         b.HasIndex(x => x.HoldExpiresAt);
         b.HasIndex(x => new { x.BookingId, x.ParentRole }).IsUnique();
-        // Unique QR payload — duplicates would mean cryptographic accident.
-        b.HasIndex(x => x.QrCodePayload).IsUnique().HasFilter("[QrCodePayload] IS NOT NULL AND LEN([QrCodePayload]) > 0");
+        // QrCodePayload is nullable until checkout; Postgres unique indexes treat NULLs as
+        // distinct, so multiple Cart rows can coexist before checkout fills the value in.
+        b.HasIndex(x => x.QrCodePayload).IsUnique();
     }
 }
 

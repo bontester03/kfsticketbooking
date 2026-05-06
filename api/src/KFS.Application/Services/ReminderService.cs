@@ -71,7 +71,7 @@ public class ReminderService : IReminderService
         foreach (var b in bookings)
         {
             if (b.Student is null) continue;
-            var tickets = b.Items.Select(i => ($"{i.ParentRole}", _qr.RenderPng(i.QrCodePayload))).ToList();
+            var tickets = b.Items.Select(i => ($"{i.ParentRole}", _qr.RenderPng(i.QrCodePayload!))).ToList();
             var html = _renderer.RenderDayBefore(new DayBeforeReminderModel(
                 b.Student.Email, $"{b.Student.FirstName} {b.Student.LastName}",
                 ev.Name, ev.EventDate, ev.Venue, ev.VenueAddress, ev.MapLink, ev.ReminderNoteFromAdmin,

@@ -4,13 +4,16 @@ This document captures every non-obvious architectural choice made while impleme
 
 ## Stack
 
-### SQL Server (chosen) vs PostgreSQL
-**Decision**: SQL Server, exactly as the spec requests. The first scaffold (now wiped) targeted PostgreSQL — incorrect against v2.
-**Why**: Spec section 2 explicitly says "SQL Server (Azure SQL compatible)" because the school's existing tooling targets it. Switching back keeps Azure SQL hosting on the table without rework.
+### PostgreSQL (chosen) — deviating from the spec
+**Decision**: PostgreSQL 16 via `Npgsql.EntityFrameworkCore.PostgreSQL`, replacing the spec's SQL Server choice.
+**Why**: User explicitly asked to "update the database to postgres" after the SQL Server pass. PG fits the Railway hosting target much better (free managed Postgres plugin, vs. SQL Server which is not a first-class Railway primitive). Trade-off: forfeit `Azure SQL` parity, but the EF Core layer abstracts most differences and the only Azure-specific feature we'd lose is parameter-sniffing-style query plans (irrelevant at this scale).
+**What changed when switching back**:
+- `BookingItem.QrCodePayload` made nullable. SQL Server's unique-with-filter (`HasFilter("[QrCodePayload] IS NOT NULL AND LEN(...) > 0")`) was the previous workaround for SQL-Server-specific NULL-uniqueness semantics. Postgres treats NULLs as distinct in unique indexes by default, so the filter is dropped and the field becomes nullable — cart rows simply hold NULL until checkout fills the value in.
+- `AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true)` set at app startup. Lets `DateOfBirth` stay as `DateTime` with `Kind=Unspecified` without per-property column-type configuration.
+- `DATABASE_URL` parsing in `Program.cs` translates Railway/Heroku-style `postgres://user:pass@host:port/db` URLs into Npgsql key=value form. Falls back to `ConnectionStrings:Default` from appsettings.
 
-### Containerisation: Microsoft mssql/server:2022-latest
-**Why**: Free dev edition, runs on Linux, what Azure SQL tracks. Connection string format matches Azure SQL.
-**Caveat**: `MSSQL_SA_PASSWORD` must be ≥ 8 chars with mixed case + digits + symbol or the container will exit immediately — captured in `.env.example`.
+### Containerisation: postgres:16-alpine
+**Why**: Smallest official Postgres image, well-supported on Railway, fast cold-starts. No password complexity rules to remember.
 
 ### IHostedService over Hangfire
 **Why**: Spec said "Hangfire or IHostedService". IHostedService + `PeriodicTimer` is built-in, requires no extra dashboard infra, and the three jobs we need (cart sweeper, rebook expirer, day-before reminder) don't need durable retries beyond what we add inside the loops. A single Hangfire dependency is overkill.

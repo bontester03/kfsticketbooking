@@ -17,7 +17,7 @@ public class BookingItem : BaseEntity
     public ParentRole ParentRole { get; set; }
 
     public string TicketNumber { get; set; } = string.Empty;
-    public string QrCodePayload { get; set; } = string.Empty;
+    public string? QrCodePayload { get; set; }
     public string? QrCodeImageUrl { get; set; }
 
     public bool EmailSent { get; set; }

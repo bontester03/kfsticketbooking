@@ -2,6 +2,7 @@ using System.IO.Compression;
 using KFS.Application.Common.Exceptions;
 using KFS.Application.DTOs.Passes;
 using KFS.Application.Interfaces;
+using KFS.Application.Services;
 using KFS.Domain.Entities;
 using KFS.Domain.Enums;
 using Microsoft.EntityFrameworkCore;

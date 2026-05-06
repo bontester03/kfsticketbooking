@@ -1,4 +1,5 @@
 using KFS.Application.DTOs.Passes;
+using KFS.Domain.Enums;
 
 namespace KFS.Application.Services;
 

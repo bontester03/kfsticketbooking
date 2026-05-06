@@ -1,22 +1,22 @@
 version: "3.9"
 
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: kfs-sqlserver
+  postgres:
+    image: postgres:16-alpine
+    container_name: kfs-postgres
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_PID: "Developer"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-KfsBooking!2024}
+      POSTGRES_DB: ${POSTGRES_DB:-kfs}
+      POSTGRES_USER: ${POSTGRES_USER:-kfs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kfs}
     ports:
-      - "${SQL_PORT:-1433}:1433"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - sqlserver-data:/var/opt/mssql
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P $$MSSQL_SA_PASSWORD -No -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P $$MSSQL_SA_PASSWORD -Q 'SELECT 1'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfs} -d ${POSTGRES_DB:-kfs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - kfs
 
@@ -26,12 +26,12 @@ services:
       dockerfile: Dockerfile
     container_name: kfs-api
     depends_on:
-      sqlserver:
+      postgres:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Default: "Server=sqlserver,1433;Database=${SQL_DB:-kfs};User Id=sa;Password=${MSSQL_SA_PASSWORD:-KfsBooking!2024};TrustServerCertificate=true;Encrypt=false"
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-kfs};Username=${POSTGRES_USER:-kfs};Password=${POSTGRES_PASSWORD:-kfs}"
       Jwt__Issuer: ${JWT_ISSUER:-kfs}
       Jwt__Audience: ${JWT_AUDIENCE:-kfs-clients}
       Jwt__Secret: ${JWT_SECRET:-please-change-me-to-a-long-random-secret-at-least-32-chars}
@@ -54,7 +54,7 @@ services:
       - kfs
 
 volumes:
-  sqlserver-data:
+  postgres-data:
   api-data:
   api-logs:
 

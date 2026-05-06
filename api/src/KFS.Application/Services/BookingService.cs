@@ -185,7 +185,7 @@ public class BookingService : IBookingService
         // Send 2 emails — one per ticket.
         foreach (var item in booking.Items)
         {
-            var png = _qr.RenderPng(item.QrCodePayload);
+            var png = _qr.RenderPng(item.QrCodePayload!);
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
                 StudentEmail: student.Email,
                 ParentLabel: item.ParentRole == ParentRole.Mother ? "Mother" : "Father",
@@ -278,7 +278,7 @@ public class BookingService : IBookingService
 
         foreach (var item in booking.Items)
         {
-            var png = _qr.RenderPng(item.QrCodePayload);
+            var png = _qr.RenderPng(item.QrCodePayload!);
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
                 student.Email, item.ParentRole == ParentRole.Mother ? "Mother" : "Father",
                 $"{student.FirstName} {student.LastName}", item.TicketNumber[^6..],
@@ -338,7 +338,7 @@ public class BookingService : IBookingService
         SeatId = seat.Id,
         ParentRole = role,
         TicketNumber = string.Empty,
-        QrCodePayload = string.Empty,
+        QrCodePayload = null,
         HoldExpiresAt = holdExpires
     };
 
