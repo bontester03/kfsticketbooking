@@ -1,263 +1,151 @@
-# KFS Booking — School Auditorium Booking System
+# KFS School Event — Ticket Booking & QR Verification Platform
 
-A full-stack monorepo for booking auditoriums at KFS School. Production-ready starter built with ASP.NET Core 8, Angular 19, PostgreSQL, JWT auth, Serilog, Swagger, EF Core migrations, and a Dockerized deployment behind Nginx.
+Reference implementation of [kfs_ticket_booking_prompt_v2.md](kfs_ticket_booking_prompt_v2.md). For every architectural choice see [DECISIONS.md](DECISIONS.md).
+
+> **Build status (this commit)**
+> - ✅ Backend: complete (.NET 8 + EF Core + SQL Server, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
+> - 🟡 Frontends (`portal`, `admin`, `scanner`): not in this commit — backend APIs are stable so they can plug in next pass
+> - 🟡 Tests: structure scaffolded; concurrency tests next pass
+> - 🟡 Azure CI: pending; Railway deploy is the documented path
 
 ## Architecture
 
 ```
 KFS/
 ├── api/                              ASP.NET Core 8 Web API
-│   ├── KfsBooking.sln
+│   ├── KFS.sln
 │   ├── src/
-│   │   ├── KfsBooking.Domain/        Entities, enums, base types (no dependencies)
-│   │   ├── KfsBooking.Application/   DTOs, service interfaces + implementations, validators
-│   │   ├── KfsBooking.Infrastructure/ EF Core DbContext, JWT, password hashing, seeding
-│   │   └── KfsBooking.Api/           Controllers, middleware, Program.cs, settings
+│   │   ├── KFS.Domain/               Entities, enums (no dependencies)
+│   │   ├── KFS.Application/          DTOs, service contracts + implementations, validators
+│   │   ├── KFS.Infrastructure/       EF Core SQL Server, JWT, QR (QRCoder), PDF (QuestPDF),
+│   │   │                             Excel (ClosedXML), email, blob storage, seeding
+│   │   └── KFS.Api/                  Controllers, SignalR hubs, IHostedService jobs,
+│   │                                 middleware, Program.cs, settings
 │   └── tests/
-│       └── KfsBooking.Tests/         xUnit + EF InMemory tests
+│       └── KFS.Tests/                xUnit + FluentAssertions
 │
-├── web/                              Angular 19 (standalone components, signals)
-│   └── src/app/
-│       ├── core/                     models, services, guards, interceptors
-│       ├── shared/                   reusable components & pipes
-│       ├── features/                 auth, dashboard, auditoriums, bookings
-│       └── layout/                   header, main layout
-│
-├── docker-compose.yml                api + web + postgres
-└── .env.example                      copy → .env to override defaults
+├── docker-compose.yml                api + sqlserver
+├── DECISIONS.md                      every non-obvious architectural choice
+├── kfs_ticket_booking_prompt_v2.md   the source spec
+└── .env.example                      copy → .env
 ```
 
 ## Stack
 
-| Concern         | Technology                                          |
-| --------------- | --------------------------------------------------- |
-| API             | ASP.NET Core 8, C# 12                               |
-| Persistence     | PostgreSQL 16, EF Core 8 (Npgsql), code-first migrations |
-| Auth            | JWT bearer tokens, BCrypt password hashing          |
-| Validation      | FluentValidation                                    |
-| Logging         | Serilog (console + rolling file)                    |
-| API docs        | Swagger / OpenAPI                                   |
-| Web             | Angular 19, standalone components, signals, RxJS    |
-| Web hosting     | Nginx (production image)                            |
-| Testing         | xUnit + FluentAssertions + EF InMemory              |
-| Container       | Multi-stage Docker builds, docker-compose           |
+| Concern              | Choice                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| API                  | ASP.NET Core 8, C# 12                                                                 |
+| Persistence          | SQL Server 2022, EF Core 8 (`Microsoft.EntityFrameworkCore.SqlServer`), code-first    |
+| Real-time            | SignalR (`/hubs/seatmap`)                                                             |
+| Auth                 | JWT (15-min access, 7-day refresh, hashed in DB), BCrypt password hashing             |
+| Validation           | FluentValidation                                                                      |
+| QR                   | QRCoder (signed JWT payload, separate signing key from auth)                          |
+| PDF / Excel          | QuestPDF, ClosedXML                                                                   |
+| Emails               | `IEmailService` abstraction; default writes HTML + attachments to `logs/email/`       |
+| Blob storage         | `IBlobStorage`; default writes to `wwwroot/` served at `/static/`                     |
+| Background jobs      | `IHostedService` + `PeriodicTimer` (cart sweeper, rebook expirer, day-before reminder)|
+| Logging              | Serilog (console + rolling file)                                                      |
+| API docs             | Swashbuckle / OpenAPI                                                                 |
 
-## Prerequisites
-
-You only need one of these paths:
-
-- **Docker route** (recommended): Docker Desktop 4.x+
-- **Local dev route**: .NET 8 SDK, Node.js 20+, PostgreSQL 14+
-
-## Quick Start (Docker)
+## Quick start (Docker)
 
 ```bash
 cp .env.example .env
-# Edit JWT_SECRET to a long random string before going past local dev.
-
+# Edit JWT_SECRET, QR_SIGNING_KEY, and SUPER_ADMIN_PASSWORD to strong randoms.
 docker compose up --build
 ```
 
-The first start runs EF Core migrations against PostgreSQL and seeds default users + auditoriums.
+| Service       | URL / port                             |
+| ------------- | -------------------------------------- |
+| API           | http://localhost:5080/api/v1           |
+| Swagger       | http://localhost:5080/swagger          |
+| SignalR       | ws://localhost:5080/hubs/seatmap       |
+| SQL Server    | localhost:1433 (sa / `MSSQL_SA_PASSWORD`) |
 
-| Service     | URL                                       |
-| ----------- | ----------------------------------------- |
-| Web (Nginx) | http://localhost:8080                     |
-| API         | http://localhost:5080/api                 |
-| Swagger     | http://localhost:5080/swagger             |
-| Postgres    | localhost:5432 (kfsbooking / kfsbooking)  |
+The first start runs EF Core migrations and seeds: 1 active event, 8 zones, 304 VIP seats, 1 super-admin (`admin@kfs.sch.sa`), 5 sample students.
 
-The Nginx config in `web/nginx.conf` proxies `/api/` → `http://api:8080/api/`, so the production Angular bundle calls a same-origin `/api`.
+### Default credentials (change immediately)
 
-## Default Seeded Users
+| Role    | Email / Login           | Password                                 |
+| ------- | ----------------------- | ---------------------------------------- |
+| Admin   | `admin@kfs.sch.sa`      | `SUPER_ADMIN_PASSWORD` env (`Admin@123`) |
+| Student | `safa.albuhairan@stu.kfs.sch.sa` | `Saf15032010` (3-letter capitalised first name + DDMMYYYY) |
+| Student | `layan.alqahtani@stu.kfs.sch.sa` | `Lay22062009` |
+| Student | `yousef.almutairi@stu.kfs.sch.sa` | `You04112010` |
+| Student | `reem.alotaibi@stu.kfs.sch.sa` | `Ree30012009` |
+| Student | `khalid.alharbi@stu.kfs.sch.sa` | `Kha12082010` |
 
-| Role    | Email                | Password     |
-| ------- | -------------------- | ------------ |
-| Admin   | admin@kfs.local      | Admin@123    |
-| Teacher | teacher@kfs.local    | Teacher@123  |
-| Student | student@kfs.local    | Student@123  |
-
-Change these the moment you deploy beyond your laptop.
+All accounts are flagged `MustChangePassword = true`.
 
 ## Local development (no Docker)
 
-### 1. Start Postgres
-
 ```bash
-docker run --name kfs-pg -e POSTGRES_PASSWORD=kfsbooking -e POSTGRES_USER=kfsbooking \
-  -e POSTGRES_DB=kfsbooking -p 5432:5432 -d postgres:16-alpine
-```
+# Start a local SQL Server (any way you like). Easiest is Docker:
+docker run --name kfs-sql -e ACCEPT_EULA=Y -e MSSQL_PID=Developer \
+  -e MSSQL_SA_PASSWORD=KfsBooking!2024 -p 1433:1433 \
+  -d mcr.microsoft.com/mssql/server:2022-latest
 
-### 2. Run the API
-
-```bash
 cd api
 dotnet restore
-dotnet ef migrations add InitialCreate \
-    --project src/KfsBooking.Infrastructure \
-    --startup-project src/KfsBooking.Api
-dotnet run --project src/KfsBooking.Api
+dotnet run --project src/KFS.Api
 ```
 
-The API listens on http://localhost:5080. Migrations + seed data run on startup.
+Open http://localhost:5080/swagger.
 
-### 3. Run the Angular app
+## REST endpoints (all under `/api/v1`)
 
-```bash
-cd web
-npm install
-npm start
-```
+### Auth (no role)
+- `POST /auth/login` (student)
+- `POST /auth/admin/login`
+- `POST /auth/refresh`
+- `POST /auth/forgot-password` / `POST /auth/reset-password`
+- `POST /auth/change-password` (any authenticated user)
 
-Open http://localhost:4200. The dev environment points at `http://localhost:5080/api`.
+### Student (role `Student`)
+- `GET  /me`
+- `GET  /events/active`
+- `GET  /events/{id}/seatmap?group=A|B`
+- `GET  /cart` / `POST /cart/select` / `DELETE /cart` / `POST /cart/checkout`
+- `GET  /bookings` / `POST /bookings/{id}/cancel` / `POST /bookings/{id}/resend-emails`
 
-## Running tests
+### Admin (role `Admin`)
+- Students: `POST /admin/students/upload`, `GET/PATCH /admin/students/...`, `POST /admin/students/{id}/reset-password`
+- Passes: `POST /admin/passes/generate`, `GET /admin/passes/batches`, `GET /admin/passes`, `PATCH /admin/passes/{id}`, `GET /admin/passes/batches/{id}/download?format=pdf|zip`
+- Bookings: `GET /admin/bookings`, `GET /admin/seatmap?group=`, `POST /admin/bookings/{id}/force-cancel`
+- Reports: `GET /admin/reports/dashboard`, `GET /admin/reports/group/{A|B}?format=csv|xlsx|pdf`
+- Reminders: `POST /admin/reminders/unbooked`, `GET /admin/reminders/logs`
+- Event: `GET /admin/event`, `PUT /admin/event/{id}`
 
-```bash
-cd api
-dotnet test
-```
+### Scanner (no auth, requires `eventToken` in body)
+- `POST /scan/verify`
 
-Tests use EF Core InMemory; no Postgres required.
+### SignalR
+- `/hubs/seatmap` — `JoinGroup(eventId, group)` / `LeaveGroup(eventId, group)`; receives `seat-changed` events.
 
-## Environment variables
+## Required env vars (production)
 
-Defined in `.env` (consumed by `docker-compose.yml`) or via `appsettings.json` overrides.
-
-| Variable                     | Default                  | Notes                                                  |
-| ---------------------------- | ------------------------ | ------------------------------------------------------ |
-| `POSTGRES_DB`                | `kfsbooking`             | Database name                                          |
-| `POSTGRES_USER`              | `kfsbooking`             | Database user                                          |
-| `POSTGRES_PASSWORD`          | `kfsbooking`             | Database password                                      |
-| `POSTGRES_PORT`              | `5432`                   | Host port mapped to Postgres                           |
-| `ASPNETCORE_ENVIRONMENT`     | `Production`             | `Development` enables Swagger + verbose logs           |
-| `API_PORT`                   | `5080`                   | Host port mapped to the API                            |
-| `JWT_ISSUER`                 | `kfsbooking`             | JWT `iss` claim                                        |
-| `JWT_AUDIENCE`               | `kfsbooking-clients`     | JWT `aud` claim                                        |
-| `JWT_SECRET`                 | *(must override)*        | HMAC-SHA256 signing key — at least 32 chars in prod    |
-| `JWT_EXPIRY_MINUTES`         | `480`                    | Token lifetime                                         |
-| `SWAGGER_ENABLED`            | `true`                   | Set `false` in production                              |
-| `WEB_PORT`                   | `8080`                   | Host port mapped to the Nginx web container            |
-| `WEB_ORIGIN`                 | `http://localhost:8080`  | Added to API CORS allowed origins                      |
-
-## REST endpoints
-
-All `/api/*` endpoints (except `/api/auth/*` and `/api/health`) require `Authorization: Bearer <token>`.
-
-### Auth
-
-| Method | Path                | Body                           | Notes                  |
-| ------ | ------------------- | ------------------------------ | ---------------------- |
-| POST   | `/api/auth/register`| `{fullName, email, password}`  | Creates a Student user |
-| POST   | `/api/auth/login`   | `{email, password}`            | Returns JWT            |
-
-### Auditoriums
-
-| Method | Path                          | Roles  |
-| ------ | ----------------------------- | ------ |
-| GET    | `/api/auditoriums`            | any    |
-| GET    | `/api/auditoriums/{id}`       | any    |
-| POST   | `/api/auditoriums`            | Admin  |
-| PUT    | `/api/auditoriums/{id}`       | Admin  |
-| DELETE | `/api/auditoriums/{id}`       | Admin  |
-
-### Bookings
-
-| Method | Path                                | Roles           |
-| ------ | ----------------------------------- | --------------- |
-| GET    | `/api/bookings`                     | Admin, Teacher  |
-| GET    | `/api/bookings/mine`                | any             |
-| GET    | `/api/bookings/{id}`                | any             |
-| POST   | `/api/bookings`                     | any             |
-| PATCH  | `/api/bookings/{id}/status`         | Admin           |
-| POST   | `/api/bookings/{id}/cancel`         | owner or Admin  |
-
-### Misc
-
-| Method | Path           | Notes                |
-| ------ | -------------- | -------------------- |
-| GET    | `/api/health`  | liveness check       |
-| GET    | `/swagger`     | Swagger UI (when enabled) |
-
-## EF Core migrations
-
-```bash
-cd api
-# Add a new migration
-dotnet ef migrations add <Name> \
-    --project src/KfsBooking.Infrastructure \
-    --startup-project src/KfsBooking.Api
-
-# Apply pending migrations explicitly
-dotnet ef database update \
-    --project src/KfsBooking.Infrastructure \
-    --startup-project src/KfsBooking.Api
-```
-
-`Database__RunMigrationsOnStartup=true` (default) makes the API apply pending migrations + seed data at boot, which is convenient for development and small deployments. Switch it off in production if you prefer to run migrations as a separate step.
-
-## Production notes
-
-- Set a strong `JWT_SECRET` and disable Swagger (`SWAGGER_ENABLED=false`).
-- Terminate TLS in front of the web container (e.g. behind a reverse proxy / load balancer) and tighten CORS via `Cors__AllowedOrigins`.
-- The API logs to `./logs/kfsbooking-*.log` inside the container — mount a volume if you need persistent logs.
-- Tune Postgres backups and resource limits in `docker-compose.yml` for your environment.
+| Variable                  | Notes                                                         |
+| ------------------------- | ------------------------------------------------------------- |
+| `ConnectionStrings__Default` | SQL Server connection string                              |
+| `Jwt__Secret`             | ≥32 chars, never commit                                       |
+| `Qr__SigningKey`          | ≥32 chars, **separate** from `Jwt__Secret`                    |
+| `Auth__SuperAdminPassword`| Initial super-admin password (only used on first boot)        |
+| `Cors__AllowedOrigins__N` | Public URL of each frontend (portal, admin, scanner)          |
+| `Database__RunMigrationsOnStartup` | `true` for self-managed deploys                      |
+| `Swagger__Enabled`        | `false` in production                                         |
 
 ## Deploying to Railway
 
-The repo is hosting-platform compatible. Each piece becomes its own Railway service inside one project:
+1. Push the repo to GitHub.
+2. In Railway → **New Project → Deploy from GitHub repo** → pick `bontester03/kfsticketbooking`.
+3. The first service is the API: set **Root Directory = `api`**. Railway picks up [api/Dockerfile](api/Dockerfile) + [api/railway.json](api/railway.json).
+4. **+ Add Database → SQL Server** (or Azure SQL externally — set `ConnectionStrings__Default` directly).
+5. On the api service → **Variables**, paste the env list above. For Railway's SQL Server plugin, the connection string format is `Server=${{ MSSQL.MSSQLHOST }},${{ MSSQL.MSSQLPORT }};Database=${{ MSSQL.MSSQLDATABASE }};User Id=${{ MSSQL.MSSQLUSER }};Password=${{ MSSQL.MSSQLPASSWORD }};TrustServerCertificate=true;Encrypt=false`.
+6. **Settings → Networking → Generate Domain** to get the public API URL.
+7. Push to `main`. The API auto-deploys, runs migrations, and seeds.
 
-| Railway service | Source | Notes |
-| --------------- | ------ | ----- |
-| `postgres`      | Plugin | "Add Database → PostgreSQL" — Railway provides `DATABASE_URL` automatically |
-| `api`           | this repo, **root directory `api`** | Uses [api/Dockerfile](api/Dockerfile) + [api/railway.json](api/railway.json) |
-| `web`           | this repo, **root directory `web`** | Uses [web/Dockerfile](web/Dockerfile) + [web/railway.json](web/railway.json) |
+The frontends (`portal`, `admin`, `scanner`) — once shipped — will live under `web/apps/*` and each becomes its own Railway service with `Root Directory` pointing at that subfolder.
 
-### Why no docker-compose on Railway?
+## What's deferred (next passes)
 
-Railway services don't share a docker network the way `docker-compose` does. The code accommodates this:
-
-- **API** reads `DATABASE_URL` (Railway's standard postgres env var) and binds to `$PORT` automatically — see [Program.cs](api/src/KfsBooking.Api/Program.cs).
-- **Web** reads its API endpoint from `assets/config.json`, which is generated at container start from the `API_URL` env var — see [docker-entrypoint.sh](web/docker-entrypoint.sh) and [main.ts](web/src/main.ts). No rebuild required to change the API URL.
-
-### One-time setup
-
-1. Push the repo to GitHub (the Railway dashboard connects to a git provider).
-2. In Railway: **New Project → Deploy from GitHub repo** → pick this repo.
-3. Create **two services** from the same repo:
-   - First service: name it `api`, set **Root Directory = `api`**.
-   - Add another service from the same repo: name it `web`, set **Root Directory = `web`**.
-4. Add a **PostgreSQL** plugin to the project (provides `DATABASE_URL`).
-
-### Required env vars on Railway
-
-**`api` service:**
-
-| Variable                  | Value                                                                       |
-| ------------------------- | --------------------------------------------------------------------------- |
-| `DATABASE_URL`            | `${{ Postgres.DATABASE_URL }}` (Railway reference)                          |
-| `Jwt__Secret`             | a long random string (32+ chars)                                            |
-| `Jwt__Issuer`             | `kfsbooking`                                                                |
-| `Jwt__Audience`           | `kfsbooking-clients`                                                        |
-| `Jwt__ExpiryMinutes`      | `480`                                                                       |
-| `ASPNETCORE_ENVIRONMENT`  | `Production`                                                                |
-| `Swagger__Enabled`        | `false` (set `true` while shaking things out)                               |
-| `Cors__AllowedOrigins__0` | the web service's public URL (e.g. `https://kfsbooking-web.up.railway.app`) |
-
-After the API service has a public URL (**Settings → Networking → Generate Domain**), copy it for the next step.
-
-**`web` service:**
-
-| Variable     | Value                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------ |
-| `API_URL`    | API service's public URL + `/api` (e.g. `https://kfsbooking-api.up.railway.app/api`)       |
-
-### Deploy
-
-Push to the branch Railway is watching. Each service rebuilds and redeploys automatically. The API runs migrations + seeds default users on first boot.
-
-### Verifying
-
-- Visit the web service URL → land on the login page. Sign in with the seeded admin (`admin@kfs.local` / `Admin@123`) and **change the password immediately**.
-- Hit `https://<api-url>/api/health` → expect `{ "status": "ok" }`.
-- If the web app can't reach the API, check the browser console — the URL it's calling comes from `/assets/config.json`, which mirrors the `API_URL` env var. CORS errors mean `Cors__AllowedOrigins__0` doesn't match the web's public origin.
+See [DECISIONS.md → "What is NOT in this commit"](DECISIONS.md#what-is-not-in-this-commit) for the full list. Headlines: React frontends, Playwright e2e tests, GitHub Actions for Azure deploy, real SendGrid integration, Azure Blob.

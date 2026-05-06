@@ -1,35 +1,38 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-COPY KfsBooking.sln ./
+COPY KFS.sln ./
 COPY Directory.Build.props ./
-COPY src/KfsBooking.Domain/*.csproj src/KfsBooking.Domain/
-COPY src/KfsBooking.Application/*.csproj src/KfsBooking.Application/
-COPY src/KfsBooking.Infrastructure/*.csproj src/KfsBooking.Infrastructure/
-COPY src/KfsBooking.Api/*.csproj src/KfsBooking.Api/
-COPY tests/KfsBooking.Tests/*.csproj tests/KfsBooking.Tests/
+COPY src/KFS.Domain/*.csproj src/KFS.Domain/
+COPY src/KFS.Application/*.csproj src/KFS.Application/
+COPY src/KFS.Infrastructure/*.csproj src/KFS.Infrastructure/
+COPY src/KFS.Api/*.csproj src/KFS.Api/
+COPY tests/KFS.Tests/*.csproj tests/KFS.Tests/
 
-RUN dotnet restore src/KfsBooking.Api/KfsBooking.Api.csproj
+RUN dotnet restore src/KFS.Api/KFS.Api.csproj
 
 COPY . .
-
-RUN dotnet publish src/KfsBooking.Api/KfsBooking.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish src/KFS.Api/KFS.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
-# Default for local docker-compose; Railway / Heroku override via PORT and Program.cs honors it.
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
-RUN useradd --uid 1000 --create-home --shell /bin/bash kfs && \
-    mkdir -p /app/logs && chown -R kfs:kfs /app
+# QuestPDF / SkiaSharp need libfontconfig at runtime on the Microsoft slim image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libfontconfig1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --create-home --shell /bin/bash kfs \
+    && mkdir -p /app/logs /app/wwwroot && chown -R kfs:kfs /app
+
 USER kfs
 
 COPY --from=build --chown=kfs:kfs /app/publish .
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:8080/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:8080/api/v1/health || exit 1
 
-ENTRYPOINT ["dotnet", "KfsBooking.Api.dll"]
+ENTRYPOINT ["dotnet", "KFS.Api.dll"]

@@ -1,68 +1,63 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: kfsbooking-postgres
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: kfs-sqlserver
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-kfsbooking}
-      POSTGRES_USER: ${POSTGRES_USER:-kfsbooking}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kfsbooking}
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-KfsBooking!2024}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${SQL_PORT:-1433}:1433"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - sqlserver-data:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfsbooking} -d ${POSTGRES_DB:-kfsbooking}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P $$MSSQL_SA_PASSWORD -No -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P $$MSSQL_SA_PASSWORD -Q 'SELECT 1'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
     networks:
-      - kfsbooking
+      - kfs
 
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: kfsbooking-api
+    container_name: kfs-api
     depends_on:
-      postgres:
+      sqlserver:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-kfsbooking};Username=${POSTGRES_USER:-kfsbooking};Password=${POSTGRES_PASSWORD:-kfsbooking}
-      Jwt__Issuer: ${JWT_ISSUER:-kfsbooking}
-      Jwt__Audience: ${JWT_AUDIENCE:-kfsbooking-clients}
-      Jwt__Secret: ${JWT_SECRET:-please-change-me-to-a-long-random-secret-32+chars}
-      Jwt__ExpiryMinutes: ${JWT_EXPIRY_MINUTES:-480}
-      Cors__AllowedOrigins__0: ${WEB_ORIGIN:-http://localhost:8080}
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=${SQL_DB:-kfs};User Id=sa;Password=${MSSQL_SA_PASSWORD:-KfsBooking!2024};TrustServerCertificate=true;Encrypt=false"
+      Jwt__Issuer: ${JWT_ISSUER:-kfs}
+      Jwt__Audience: ${JWT_AUDIENCE:-kfs-clients}
+      Jwt__Secret: ${JWT_SECRET:-please-change-me-to-a-long-random-secret-at-least-32-chars}
+      Jwt__AccessTokenMinutes: ${JWT_ACCESS_MINUTES:-15}
+      Jwt__RefreshTokenDays: ${JWT_REFRESH_DAYS:-7}
+      Qr__Issuer: ${QR_ISSUER:-kfs-qr}
+      Qr__SigningKey: ${QR_SIGNING_KEY:-please-change-this-separately-from-jwt-secret}
+      Auth__SuperAdminPassword: ${SUPER_ADMIN_PASSWORD:-Admin@123}
+      Cors__AllowedOrigins__0: ${WEB_PORTAL_ORIGIN:-http://localhost:5173}
+      Cors__AllowedOrigins__1: ${WEB_ADMIN_ORIGIN:-http://localhost:5174}
+      Cors__AllowedOrigins__2: ${WEB_SCANNER_ORIGIN:-http://localhost:5175}
       Database__RunMigrationsOnStartup: "true"
       Swagger__Enabled: ${SWAGGER_ENABLED:-true}
     ports:
       - "${API_PORT:-5080}:8080"
+    volumes:
+      - api-data:/app/wwwroot
+      - api-logs:/app/logs
     networks:
-      - kfsbooking
-
-  web:
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-    container_name: kfsbooking-web
-    depends_on:
-      - api
-    environment:
-      PORT: "80"
-      API_URL: ${WEB_API_URL:-/api}
-      LOCAL_API_UPSTREAM: http://api:8080/api/
-    ports:
-      - "${WEB_PORT:-8080}:80"
-    networks:
-      - kfsbooking
+      - kfs
 
 volumes:
-  postgres-data:
+  sqlserver-data:
+  api-data:
+  api-logs:
 
 networks:
-  kfsbooking:
+  kfs:
     driver: bridge
