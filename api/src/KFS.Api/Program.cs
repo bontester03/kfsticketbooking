@@ -6,19 +6,12 @@ using KFS.Application;
 using KFS.Application.Interfaces;
 using KFS.Infrastructure;
 using KFS.Infrastructure.Persistence;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using QuestPDF;
 using QuestPDF.Infrastructure;
 using Serilog;
 
 QuestPDF.Settings.License = LicenseType.Community;
-
-// Npgsql 6+ rejects DateTime.Kind=Unspecified by default. The codebase uses UTC consistently
-// for time-of-event values, but DateOfBirth (a calendar-only field) is loaded as Unspecified.
-// Enabling the legacy switch keeps that just-works without per-property column-type wrangling.
-AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +26,10 @@ builder.Host.UseSerilog((ctx, services, cfg) => cfg
     .WriteTo.File("logs/kfs-.log", rollingInterval: RollingInterval.Day));
 
 var config = builder.Configuration;
+
+// Application Insights — connection string injected as an env var on Azure App Service.
+// Locally absent: AddApplicationInsightsTelemetry no-ops cleanly.
+builder.Services.AddApplicationInsightsTelemetry();
 
 builder.Services.AddInfrastructure(config);
 builder.Services.AddApplication();
@@ -62,6 +59,8 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+builder.Services.AddHealthChecks();
+
 const string corsPolicy = "kfs-cors";
 builder.Services.AddCors(options => options.AddPolicy(corsPolicy, p =>
 {
@@ -85,7 +84,8 @@ if (app.Environment.IsDevelopment() || config.GetValue<bool>("Swagger:Enabled"))
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "KFS Booking API v1"));
 }
 
-// Serve QR PNGs and other generated blobs from the local-disk store.
+// Local-disk fallback for QR PNGs when Storage:Provider is LocalDisk. On Azure with
+// Storage:Provider=AzureBlob the API never serves blobs directly — clients fetch via SAS URL.
 var staticRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
 Directory.CreateDirectory(staticRoot);
 app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
@@ -97,6 +97,9 @@ app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
 app.UseCors(corsPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
+
+// /healthz is the App Service / Static Web App / Azure Front Door probe path. Cheap, no DB hit.
+app.MapHealthChecks("/healthz");
 
 app.MapControllers();
 app.MapHub<SeatMapHub>("/hubs/seatmap");
@@ -117,6 +120,9 @@ static void NormalizePort(WebApplicationBuilder builder)
 
 // Translate Railway/Heroku-style DATABASE_URL (postgres://user:pass@host:port/db) into the
 // Npgsql key=value format. If DATABASE_URL is absent, the appsettings value passes through.
+// On Azure App Service the connection string is injected via Key Vault reference into
+// ConnectionStrings__Default, so neither branch runs in production — but it costs nothing
+// to support both formats and keeps local dev consistent with cloud-style env vars.
 static void NormalizeConnectionString(WebApplicationBuilder builder)
 {
     var raw = Environment.GetEnvironmentVariable("DATABASE_URL");

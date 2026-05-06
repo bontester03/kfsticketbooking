@@ -8,14 +8,16 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
 {
     public void Configure(EntityTypeBuilder<Student> b)
     {
-        b.ToTable("Students");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Email).HasMaxLength(180).IsRequired();
+        // citext makes email comparisons case-insensitive at the column level — no need to
+        // ToLowerInvariant() in every query.
+        b.Property(x => x.Email).HasColumnType("citext").HasMaxLength(180).IsRequired();
         b.HasIndex(x => x.Email).IsUnique();
         b.Property(x => x.FirstName).HasMaxLength(120).IsRequired();
         b.Property(x => x.LastName).HasMaxLength(120).IsRequired();
         b.Property(x => x.GradeOrClass).HasMaxLength(60);
         b.Property(x => x.PasswordHash).IsRequired();
+        b.Property(x => x.DateOfBirth).HasColumnType("date");
     }
 }
 
@@ -23,9 +25,8 @@ public class AdminConfiguration : IEntityTypeConfiguration<Admin>
 {
     public void Configure(EntityTypeBuilder<Admin> b)
     {
-        b.ToTable("Admins");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Email).HasMaxLength(180).IsRequired();
+        b.Property(x => x.Email).HasColumnType("citext").HasMaxLength(180).IsRequired();
         b.HasIndex(x => x.Email).IsUnique();
         b.Property(x => x.FullName).HasMaxLength(160).IsRequired();
         b.Property(x => x.PasswordHash).IsRequired();
@@ -37,7 +38,6 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
 {
     public void Configure(EntityTypeBuilder<Event> b)
     {
-        b.ToTable("Events");
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(160).IsRequired();
         b.Property(x => x.Venue).HasMaxLength(160).IsRequired();
@@ -53,7 +53,6 @@ public class ZoneConfiguration : IEntityTypeConfiguration<Zone>
 {
     public void Configure(EntityTypeBuilder<Zone> b)
     {
-        b.ToTable("Zones");
         b.HasKey(x => x.Id);
         b.Property(x => x.Code).HasConversion<int>();
         b.Property(x => x.Group).HasConversion<int>();
@@ -70,7 +69,6 @@ public class SeatConfiguration : IEntityTypeConfiguration<Seat>
 {
     public void Configure(EntityTypeBuilder<Seat> b)
     {
-        b.ToTable("Seats");
         b.HasKey(x => x.Id);
         b.Property(x => x.RowLabel).HasMaxLength(4).IsRequired();
         b.Property(x => x.FullLabel).HasMaxLength(20).IsRequired();
@@ -84,7 +82,6 @@ public class BookingConfiguration : IEntityTypeConfiguration<Booking>
 {
     public void Configure(EntityTypeBuilder<Booking> b)
     {
-        b.ToTable("Bookings");
         b.HasKey(x => x.Id);
         b.Property(x => x.Status).HasConversion<int>();
         b.Property(x => x.GroupChosen).HasConversion<int>();
@@ -102,7 +99,6 @@ public class BookingItemConfiguration : IEntityTypeConfiguration<BookingItem>
 {
     public void Configure(EntityTypeBuilder<BookingItem> b)
     {
-        b.ToTable("BookingItems");
         b.HasKey(x => x.Id);
         b.Property(x => x.ParentRole).HasConversion<int>();
         b.Property(x => x.TicketNumber).HasMaxLength(60);
@@ -126,7 +122,6 @@ public class AdminPassConfiguration : IEntityTypeConfiguration<AdminPass>
 {
     public void Configure(EntityTypeBuilder<AdminPass> b)
     {
-        b.ToTable("AdminPasses");
         b.HasKey(x => x.Id);
         b.Property(x => x.Type).HasConversion<int>();
         b.Property(x => x.TicketNumber).HasMaxLength(60).IsRequired();
@@ -146,7 +141,6 @@ public class ScanLogConfiguration : IEntityTypeConfiguration<ScanLog>
 {
     public void Configure(EntityTypeBuilder<ScanLog> b)
     {
-        b.ToTable("ScanLogs");
         b.HasKey(x => x.Id);
         b.Property(x => x.ScannedItemType).HasConversion<int>();
         b.Property(x => x.Result).HasConversion<int>();
@@ -161,7 +155,6 @@ public class ReminderLogConfiguration : IEntityTypeConfiguration<ReminderLog>
 {
     public void Configure(EntityTypeBuilder<ReminderLog> b)
     {
-        b.ToTable("ReminderLogs");
         b.HasKey(x => x.Id);
         b.Property(x => x.Type).HasConversion<int>();
         b.Property(x => x.EmailMessageId).HasMaxLength(180);
@@ -174,7 +167,6 @@ public class PasswordResetConfiguration : IEntityTypeConfiguration<PasswordReset
 {
     public void Configure(EntityTypeBuilder<PasswordReset> b)
     {
-        b.ToTable("PasswordResets");
         b.HasKey(x => x.Id);
         b.Property(x => x.Token).HasMaxLength(120).IsRequired();
         b.HasIndex(x => x.Token).IsUnique();
@@ -186,12 +178,11 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
 {
     public void Configure(EntityTypeBuilder<AuditLog> b)
     {
-        b.ToTable("AuditLogs");
         b.HasKey(x => x.Id);
         b.Property(x => x.ActorType).HasConversion<int>();
         b.Property(x => x.Action).HasMaxLength(120).IsRequired();
         b.Property(x => x.EntityType).HasMaxLength(120);
-        b.Property(x => x.MetadataJson).HasMaxLength(4000);
+        b.Property(x => x.MetadataJson).HasColumnType("jsonb");
         b.HasIndex(x => x.Timestamp);
     }
 }
@@ -200,7 +191,6 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     public void Configure(EntityTypeBuilder<RefreshToken> b)
     {
-        b.ToTable("RefreshTokens");
         b.HasKey(x => x.Id);
         b.Property(x => x.UserType).HasConversion<int>();
         b.Property(x => x.TokenHash).HasMaxLength(128).IsRequired();

@@ -1,0 +1,125 @@
+name: Deploy to Azure
+
+# Triggered manually (workflow_dispatch) or on push to main when API code or infra changes.
+# Uses GitHub OIDC → Azure federated credentials, never a long-lived service principal secret.
+#
+# Required GitHub repo secrets (set per environment):
+#   AZURE_CLIENT_ID         App registration with federated credentials configured for this repo+env
+#   AZURE_TENANT_ID
+#   AZURE_SUBSCRIPTION_ID
+#   AZURE_RESOURCE_GROUP    e.g. rg-kfs-prod
+#   POSTGRES_ADMIN_PASSWORD
+#   JWT_SECRET
+#   QR_SIGNING_KEY
+#   SUPER_ADMIN_PASSWORD
+#
+# Required GitHub repo variables:
+#   AZURE_APP_NAME          e.g. app-kfs-prod-uaen
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options: [dev, prod]
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'infra/**'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-infra:
+    name: Bicep deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'prod' }}
+    outputs:
+      apiUrl: ${{ steps.deploy.outputs.apiUrl }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if (preview changes)
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          QR_SIGNING_KEY: ${{ secrets.QR_SIGNING_KEY }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        run: |
+          az deployment group what-if \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters infra/${{ inputs.environment || 'prod' }}.bicepparam
+
+      - name: Apply
+        id: deploy
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          QR_SIGNING_KEY: ${{ secrets.QR_SIGNING_KEY }}
+          SUPER_ADMIN_PASSWORD: ${{ secrets.SUPER_ADMIN_PASSWORD }}
+        run: |
+          OUT=$(az deployment group create \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters infra/${{ inputs.environment || 'prod' }}.bicepparam \
+            --query properties.outputs --output json)
+          echo "apiUrl=$(echo "$OUT" | jq -r '.apiUrl.value')" >> $GITHUB_OUTPUT
+
+  deploy-api:
+    name: API publish + deploy
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'prod' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        working-directory: api
+        run: |
+          dotnet publish src/KFS.Api/KFS.Api.csproj \
+            --configuration Release \
+            --output ${{ runner.temp }}/publish \
+            /p:UseAppHost=false
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_APP_NAME }}
+          package: ${{ runner.temp }}/publish
+
+      - name: Smoke test /healthz
+        run: |
+          for i in {1..12}; do
+            if curl -fsS "${{ needs.deploy-infra.outputs.apiUrl }}/healthz" >/dev/null; then
+              echo "healthz OK"; exit 0
+            fi
+            echo "waiting for healthz... ($i/12)"; sleep 10
+          done
+          echo "healthz never returned 200"; exit 1

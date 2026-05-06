@@ -26,16 +26,40 @@ Use this stack unless you hit a specific blocker (justify any deviation in `DECI
 
 - **Backend:** .NET 8 Web API, C#, Entity Framework Core
 - **Frontend:** React 18 + TypeScript + Vite, TailwindCSS, shadcn/ui
-- **Database:** SQL Server (Azure SQL compatible)
+- **Database:** **PostgreSQL 16** with `Npgsql.EntityFrameworkCore.PostgreSQL` provider
 - **Real-time:** SignalR for live seat-map updates
 - **Auth:** JWT (access + refresh), BCrypt password hashing
-- **Email:** SendGrid (abstract behind `IEmailService` so Azure Communication Services can swap in)
+- **Email:** SendGrid (abstract behind `IEmailService` so a different provider can swap in)
 - **QR generation:** `QRCoder` NuGet package
 - **PDF generation (printable QR sheets):** `QuestPDF`
 - **Excel parsing:** `ClosedXML` for student roster uploads
 - **Scanner camera:** `html5-qrcode` (must support iPad rear camera with mirror correction)
-- **Hosting target:** Azure App Service (Linux) + Azure SQL + Azure Blob Storage
-- **Containerisation:** `docker-compose.yml` for local dev (API + SQL Server + frontend apps)
+- **Hosting target:** **Microsoft Azure**, all resources provisioned in the **UAE North (Dubai)** region for data residency:
+  - `api` → **Azure App Service for Linux** (.NET 8 stack), deployed from `/src/KFS.Api` Dockerfile (or built-in stack runtime — pick in `DECISIONS.md`).
+  - `postgres` → **Azure Database for PostgreSQL — Flexible Server** (Burstable B2s tier is sufficient for a single-event load; scale up if running multiple events). Enable HA standby in same region for event day.
+  - `portal` / `admin` / `scanner` → **Azure Static Web Apps** (one per frontend), with route-based API proxy back to the App Service.
+- **Object storage:** **Azure Blob Storage** account in UAE North for generated QR PNGs and printable PDF/ZIP outputs. Containers: `qr-codes`, `printable-batches`. Use Managed Identity from the App Service to access (no connection string in app config). Abstract behind `IBlobStorage`.
+- **Secrets:** **Azure Key Vault** in UAE North. App Service reads via Managed Identity. Never put secrets in App Settings except for Key Vault references (`@Microsoft.KeyVault(...)`).
+- **Containerisation:** `docker-compose.yml` for local dev (API + PostgreSQL 16 + **Azurite** as Azure Blob stand-in + frontend apps).
+- **Time zone:** application default is `Asia/Dubai` (UTC+4, no DST). All scheduled jobs (day-before reminder, cart sweeper) compute against this zone. Store all datetimes as `timestamptz` and convert to `Asia/Dubai` for UI, emails, and reports.
+- **Data residency:** keep all PII (student records, parent names, emails, QR payloads) inside UAE North. Do not enable cross-region replication for the database. If using Azure backup, configure UAE-only backup storage.
+
+**PostgreSQL-specific guidance for Claude Code:**
+- Use `snake_case` table and column naming via `UseSnakeCaseNamingConvention()` (EFCore.NamingConventions package), OR keep EF defaults — pick one and document in `DECISIONS.md`.
+- Enable the `citext` extension for case-insensitive email columns.
+- Enable `pgcrypto` for `gen_random_uuid()` if using UUID primary keys (recommended over `int` identity for this project — easier to expose IDs in QR payloads without leaking row counts).
+- Use `timestamptz` (timestamp with time zone) for all datetime columns; never `timestamp` without timezone.
+- Use `jsonb` (not `json`) for `AuditLogs.MetadataJson`.
+
+**Azure-specific guidance for Claude Code:**
+- Provision via **Bicep templates** in `/infra/` — one main template + parameter files for `dev` and `prod` environments. Use the AVM (Azure Verified Modules) where possible.
+- App Service: enable Managed Identity, configure Key Vault references for connection strings and secrets, set `WEBSITE_TIME_ZONE=Arabian Standard Time`, enable Application Insights for telemetry, set the health check path to `/healthz`.
+- Postgres Flexible Server: enable the `pg_trgm`, `citext`, and `pgcrypto` extensions via the `azure.extensions` server parameter. Connection from App Service uses VNet integration + private endpoint (no public access). Use AAD authentication for the App Service Managed Identity rather than password auth.
+- Storage account: container access set to `Private`. Generate short-lived SAS tokens server-side when serving QR images to authenticated students; for the public scanner page, embed QR validation in the API response rather than exposing blob URLs directly.
+- SignalR: for production scale, use **Azure SignalR Service** in `Default` mode rather than self-hosted; for the expected ~600 concurrent users this is optional but cheap insurance for event day.
+- CDN / WAF: front the App Service with **Azure Front Door** if expecting traffic spikes; otherwise direct App Service exposure with rate limiting in code is fine for school-scale traffic.
+- Deploy via **GitHub Actions** with OIDC federated credentials (no service principal secrets). One workflow file per environment.
+- Local dev: use the Azure CLI + `az login` for developer access to dev Key Vault and Storage. Use **Azurite** Docker image for local blob emulation so devs don't hit cloud storage during development.
 
 ---
 
@@ -119,7 +143,7 @@ Both seats must always be in the **same group** — never one in Group A and one
 1. Each student is allocated exactly **2 tickets** — one mother seat, one father seat. They are auto-paired (see Section 4).
 2. **Cart hold:** when a student selects a female-side seat (which auto-pairs the male mirror), both seats are held for **10 minutes**. A background job releases expired holds. Live countdown displayed in UI.
 3. **Cancellation window:** if a student cancels their confirmed booking, both seats return to the pool, and the student gets a **10-minute re-booking window** to pick replacements. After 10 mins, allocation is forfeited (configurable in admin settings).
-4. **Concurrency:** wrap the paired-seat reserve in a `Serializable` transaction with `UPDLOCK, ROWLOCK` hints. Both seats either reserve atomically or both fail.
+4. **Concurrency:** wrap the paired-seat reserve in a transaction with `IsolationLevel.Serializable` and use `SELECT ... FOR UPDATE` (via `EF.Property` + raw SQL or `dbContext.Database.ExecuteSqlInterpolatedAsync`) to row-lock both the chosen seat and its mirror before insert. Both seats either reserve atomically or both fail. Handle PostgreSQL serialization failures (SQLState `40001`) with a single retry.
 5. **No cross-group booking** — both seats must be in the same group (A or B).
 6. **One active booking per student** — a student cannot have two simultaneous confirmed bookings.
 
@@ -147,7 +171,7 @@ Each generated batch:
 ## 9. QR Code Strategy
 
 - **Payload:** signed JWT containing `{ ticketId, eventId, type, zone, seatLabel?, seatsCount, iat, exp }` signed with `QR_SIGNING_KEY` (separate from auth JWT secret). Expires 24 hours after event end.
-- **Render:** PNG, 300×300, error correction level Q. Stored in Azure Blob (`/qr/{eventId}/{ticketNumber}.png`).
+- **Render:** PNG, 300×300, error correction level Q. Stored in **Azure Blob Storage** (UAE North) at `qr-codes/{eventId}/{ticketNumber}.png` (or local **Azurite** emulator in dev). Behind `IBlobStorage` abstraction. Served to authenticated clients via short-lived SAS URLs (5-minute expiry); never expose container as public.
 - **Validation:** scanner posts payload → API verifies signature, expiry, looks up the corresponding `BookingItem` or `AdminPass`, writes a `ScanLog` entry, returns rich response (zone, name, seat label, already-scanned flag).
 
 ---
@@ -381,7 +405,7 @@ Use Hangfire or `IHostedService`:
 - Excel upload validation: max 5 MB, MIME sniff, content scan, row cap.
 - Sanitise all user-supplied strings before email rendering (XSS).
 - All admin actions written to `AuditLogs`.
-- Secrets via env vars / Azure Key Vault.
+- Secrets via **Azure Key Vault** (UAE North), accessed by App Service Managed Identity. Never committed.
 - Input validation with FluentValidation.
 - Scanner endpoint rate-limited per IP.
 - Camera permission request flow with clear UX.
@@ -412,6 +436,8 @@ Use Hangfire or `IHostedService`:
   /KFS.Application.Tests
   /e2e                    Playwright (incl. paired-booking concurrency)
 docker-compose.yml
+/infra                    Bicep templates + parameter files (dev, prod)
+/.github/workflows        CI + Azure deploy (OIDC)
 README.md
 DECISIONS.md
 ```
@@ -420,7 +446,8 @@ DECISIONS.md
 
 ## 21. Definition of Done
 
-- [ ] `docker-compose up` brings up API, SQL Server, all 3 frontends.
+- [ ] `docker-compose up` brings up API, **PostgreSQL 16**, **Azurite** (Azure Blob emulator), all 3 frontends locally.
+- [ ] Repository deploys cleanly to **Azure UAE North**: App Service (api), Postgres Flexible Server, Storage Account, Key Vault, three Static Web Apps (portal/admin/scanner). Healthchecks green and `/healthz` returns 200.
 - [ ] Seed migration creates the venue, an active event, super-admin, all 304 VIP seats, 5 sample students.
 - [ ] Admin uploads Excel → student accounts created with the correct password format.
 - [ ] Student logs in, picks group + side + seat → mirror seat auto-paired → checkout → 2 emails arrive with valid QRs matching the screenshot format (incl. Arabic line).
@@ -435,7 +462,7 @@ DECISIONS.md
 - [ ] Day-before reminder fires automatically and includes QRs + map link.
 - [ ] Unit tests cover paired-seat concurrency, allocation enforcement, QR signing, mirror calculation.
 - [ ] README explains setup; DECISIONS.md captures every assumption.
-- [ ] GitHub Actions workflow deploys API to Azure App Service and frontends to Azure Static Web Apps.
+- [ ] GitHub Actions workflow runs `dotnet test` + frontend lint/typecheck on PRs and **deploys to Azure UAE North via OIDC** on push to `main`. Bicep templates are validated (`az deployment group what-if`) before apply.
 
 ---
 

@@ -1,19 +1,51 @@
 # DECISIONS — KFS Ticket Booking Platform
 
-This document captures every non-obvious architectural choice made while implementing [kfs_ticket_booking_prompt_v2.md](kfs_ticket_booking_prompt_v2.md). Each entry: **what**, **why**, and **alternatives considered**.
+This document captures every non-obvious architectural choice made while implementing [kfs_ticket_booking_prompt_v2 (1).md](kfs_ticket_booking_prompt_v2%20%281%29.md). Each entry: **what**, **why**, and **alternatives considered**.
+
+## Hosting target: Azure UAE North
+
+The school's data must stay in-region. Every PII-bearing resource (Postgres, Storage, Key Vault, App Insights, App Service) is provisioned in `uaenorth`. Static Web Apps is the one exception — it's not GA in UAE North as of writing, so the three frontends pin to `centralus`. SWAs serve only static assets (no PII), so this is acceptable; documented here so a reviewer doesn't need to chase it.
+
+The full deployment is captured in [infra/main.bicep](infra/main.bicep) and per-env parameter files. CI deploys via OIDC federated credentials — see [.github/workflows/deploy.yml](.github/workflows/deploy.yml). No long-lived service principal secrets.
 
 ## Stack
 
-### PostgreSQL (chosen) — deviating from the spec
-**Decision**: PostgreSQL 16 via `Npgsql.EntityFrameworkCore.PostgreSQL`, replacing the spec's SQL Server choice.
-**Why**: User explicitly asked to "update the database to postgres" after the SQL Server pass. PG fits the Railway hosting target much better (free managed Postgres plugin, vs. SQL Server which is not a first-class Railway primitive). Trade-off: forfeit `Azure SQL` parity, but the EF Core layer abstracts most differences and the only Azure-specific feature we'd lose is parameter-sniffing-style query plans (irrelevant at this scale).
-**What changed when switching back**:
-- `BookingItem.QrCodePayload` made nullable. SQL Server's unique-with-filter (`HasFilter("[QrCodePayload] IS NOT NULL AND LEN(...) > 0")`) was the previous workaround for SQL-Server-specific NULL-uniqueness semantics. Postgres treats NULLs as distinct in unique indexes by default, so the filter is dropped and the field becomes nullable — cart rows simply hold NULL until checkout fills the value in.
-- `AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true)` set at app startup. Lets `DateOfBirth` stay as `DateTime` with `Kind=Unspecified` without per-property column-type configuration.
-- `DATABASE_URL` parsing in `Program.cs` translates Railway/Heroku-style `postgres://user:pass@host:port/db` URLs into Npgsql key=value form. Falls back to `ConnectionStrings:Default` from appsettings.
+### PostgreSQL 16 (matches spec v2 (1))
+EF Core 8 + `Npgsql.EntityFrameworkCore.PostgreSQL` 8.0.4. Earlier passes detoured through SQL Server (spec v2) and back to Postgres (user request) — v2 (1) settles the question for good and adds Azure Database for PostgreSQL — Flexible Server as the managed target.
 
-### Containerisation: postgres:16-alpine
-**Why**: Smallest official Postgres image, well-supported on Railway, fast cold-starts. No password complexity rules to remember.
+### Naming convention: snake_case via EFCore.NamingConventions
+Tables and columns are snake_case (`booking_items`, `qr_code_payload`). The spec offers either default-PascalCase or snake_case; snake_case matches PG ecosystem norms (psql, pgAdmin, dbt, etc.) and stops the constant `"BookingItems"` quoting in raw SQL.
+
+### Postgres-specific column types
+- **Email columns** are `citext` (case-insensitive comparison) — drops the `ToLowerInvariant()` calls scattered across services.
+- **`AuditLogs.metadata_json`** is `jsonb` (queryable in pure SQL, indexable on JSON paths). Spec calls this out explicitly.
+- **`students.date_of_birth`** is `date`, not `timestamp` — it's a calendar value with no time component.
+- **All other datetimes** are `timestamp with time zone` (timestamptz). Default Npgsql 8 behavior; no legacy switch enabled. The codebase uses `DateTime.UtcNow` consistently so all writes have `Kind=Utc`, which is the only safe input for timestamptz columns.
+
+### Postgres extensions
+Declared in `OnModelCreating` and emitted into the initial migration: `citext`, `pgcrypto`, `pg_trgm`. The Bicep template enables them via the `azure.extensions` server parameter so the migration applies cleanly in Azure.
+
+### Time zone: Asia/Dubai (UTC+4, no DST)
+Stored everywhere as UTC; rendered as Asia/Dubai for emails, reports, UI. [`KfsTime`](api/src/KFS.Application/Common/KfsTime.cs) is a static helper with a `FormatLocal` extension on `DateTime`. Resolves the IANA id on Linux and the Windows id on Windows hosts; falls back to a custom +4 zone if neither is available (covers trimmed Alpine images).
+**App Service**: `WEBSITE_TIME_ZONE=Arabian Standard Time` is set in App Settings so any direct `DateTime.Now` calls (none today, but defensive) also resolve to Dubai.
+
+### Concurrency: Serializable + SELECT FOR UPDATE + 40001 retry
+The paired-seat reservation runs inside `IsolationLevel.Serializable`, **and** explicitly takes a row lock on both target seat rows with `SELECT 1 FROM seats WHERE id = ANY(...) FOR UPDATE` before the conflict check. If Postgres aborts the transaction with SQLState `40001` (serialization_failure), the service catches it, clears the change tracker, and retries once. After two attempts a conflict surfaces as `409 seat_taken` so the portal refreshes the seat map via SignalR.
+
+### Storage: `IBlobStorage` with two backends
+- `LocalDiskBlobStorage` — writes to `wwwroot/`; serves at `/static/`. Default for bare-metal local runs.
+- `AzureBlobStorage` — used in Docker (Azurite) and Azure (Managed Identity → Storage account). Generates **5-minute SAS URLs** for blobs when running against a real Storage account, mirroring the spec. Connection-string mode (Azurite) returns plain URLs since the local emulator doesn't enforce auth.
+- Switch via `Storage:Provider` config: `LocalDisk` (default) or `AzureBlob`. The Bicep template wires `AzureBlob` + the storage URL via Managed Identity.
+- Containers `qr-codes` and `printable-batches` are created by the Bicep template; the local `azurite` Docker service creates them on first write.
+
+### IHostedService over Hangfire
+Built-in, no extra dashboard infra. Three jobs: cart sweeper (30s), rebook expirer (60s), day-before reminder (hourly). All idempotent so a missed tick does not corrupt state.
+
+### SignalR (built-in)
+Single-instance scale today. For event day with ~600 concurrent users (per spec), Azure SignalR Service in `Default` mode is the swap-in. Wiring is one line: `AddSignalR().AddAzureSignalR(connectionString)`. Not enabled yet because we haven't committed to multi-instance.
+
+### Application Insights
+`AddApplicationInsightsTelemetry()` reads `APPLICATIONINSIGHTS_CONNECTION_STRING` from env. Set automatically by the Bicep template via `appInsights.outputs.connectionString`. No-op locally without the env var.
 
 ### IHostedService over Hangfire
 **Why**: Spec said "Hangfire or IHostedService". IHostedService + `PeriodicTimer` is built-in, requires no extra dashboard infra, and the three jobs we need (cart sweeper, rebook expirer, day-before reminder) don't need durable retries beyond what we add inside the loops. A single Hangfire dependency is overkill.

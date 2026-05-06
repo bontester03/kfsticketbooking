@@ -1,4 +1,5 @@
 using System.Text;
+using KFS.Application.Common;
 using KFS.Application.Interfaces;
 using KFS.Domain.Enums;
 
@@ -23,7 +24,7 @@ public class TicketEmailRenderer : ITicketEmailRenderer
             <table align="center" width="560" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px">
                 <tr><td>
                     <h2 style="margin:0 0 8px 0;color:#1e3a8a">{{m.EventName}}</h2>
-                    <p style="margin:0 0 16px 0;color:#475569">{{m.EventDate:dd MMM yyyy, HH:mm}} · {{m.Venue}}</p>
+                    <p style="margin:0 0 16px 0;color:#475569">{{m.EventDate.FormatLocal()}} · {{m.Venue}}</p>
                     <table width="100%" cellpadding="6" style="background:#f8fafc;border-radius:8px;font-size:14px">
                         <tr><td style="color:#64748b;width:120px">#</td><td>****{{m.TicketLast6}}</td></tr>
                         <tr><td style="color:#64748b">CATEGORY</td><td>{{category}}</td></tr>
@@ -57,7 +58,7 @@ public class TicketEmailRenderer : ITicketEmailRenderer
         <tr><td>
             <h2 style="margin:0 0 8px 0;color:#1e3a8a">Reminder — {m.EventName} tomorrow</h2>
             <p>Dear {m.StudentName},</p>
-            <p>{m.EventName} is tomorrow ({m.EventDate:dd MMM yyyy, HH:mm}) at {m.Venue}.</p>
+            <p>{m.EventName} is tomorrow ({m.EventDate.FormatLocal()}) at {m.Venue}.</p>
             <p><strong>Address:</strong> {m.VenueAddress}</p>
         """);
         if (!string.IsNullOrEmpty(m.MapLink))
@@ -90,7 +91,7 @@ public class TicketEmailRenderer : ITicketEmailRenderer
         <h2 style="margin:0 0 8px 0;color:#1e3a8a">{m.EventName} — please book your seats</h2>
         <p>Dear {m.StudentName},</p>
         {custom}
-        <p>Event date: <strong>{m.EventDate:dd MMM yyyy, HH:mm}</strong>. Please log in to the portal to pick a row + seat for your mother and father.</p>
+        <p>Event date: <strong>{m.EventDate.FormatLocal()}</strong>. Please log in to the portal to pick a row + seat for your mother and father.</p>
         </td></tr></table></body></html>
         """;
     }

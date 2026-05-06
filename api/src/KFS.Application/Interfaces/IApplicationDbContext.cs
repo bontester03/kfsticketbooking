@@ -1,5 +1,6 @@
 using KFS.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace KFS.Application.Interfaces;
@@ -21,6 +22,7 @@ public interface IApplicationDbContext
     DbSet<RefreshToken> RefreshTokens { get; }
 
     Microsoft.EntityFrameworkCore.Infrastructure.DatabaseFacade Database { get; }
+    ChangeTracker ChangeTracker { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
     Task<IDbContextTransaction> BeginSerializableTransactionAsync(CancellationToken ct = default);

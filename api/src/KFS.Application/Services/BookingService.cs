@@ -6,6 +6,7 @@ using KFS.Domain.Entities;
 using KFS.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace KFS.Application.Services;
 
@@ -87,43 +88,67 @@ public class BookingService : IBookingService
 
         var holdExpires = now.AddMinutes(ev.CartHoldMinutes);
 
-        Booking booking;
-        await using (var tx = await _db.BeginSerializableTransactionAsync(ct))
+        // Female-side seat → mother. Male-side seat → father. Decide once outside the loop.
+        var (motherZone, motherSeat, fatherZone, fatherSeat) =
+            pickedSeat.ZoneId == ZoneIdFor(zones, ZoneSide.Female)
+                ? (pickedZone, pickedSeat, mirrorZone, mirrorSeat)
+                : (mirrorZone, mirrorSeat, pickedZone, pickedSeat);
+
+        // Reserve under Serializable isolation. Postgres can abort with SQLState 40001 if it
+        // detects an inconsistency from a concurrent transaction; one retry is enough — the
+        // caller's UI is also re-fetching the seat map via SignalR before they pick again.
+        Booking booking = null!;
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            // Double-check no active hold/confirm exists for either seat under serializable isolation.
-            var conflict = await _db.BookingItems
-                .Include(bi => bi.Booking)
-                .Where(bi => (bi.SeatId == pickedSeat.Id || bi.SeatId == mirrorSeat.Id)
-                             && bi.Booking!.Status != BookingStatus.Cancelled
-                             && bi.Booking.Status != BookingStatus.Expired
-                             && (bi.Booking.Status == BookingStatus.Confirmed
-                                 || bi.HoldExpiresAt > now))
-                .Select(bi => bi.SeatId)
-                .ToListAsync(ct);
-            if (conflict.Count > 0)
-                throw new ConflictException("seat_taken", "That seat is no longer available.",
-                    new { zone = pickedZoneCode.ToString(), row = request.RowLabel, seat = request.SeatNumber });
-
-            booking = new Booking
+            try
             {
-                StudentId = studentId,
-                EventId = ev.Id,
-                Status = BookingStatus.Cart,
-                GroupChosen = request.Group
-            };
-            _db.Bookings.Add(booking);
+                await using var tx = await _db.BeginSerializableTransactionAsync(ct);
 
-            // Female-side seat → mother. Male-side seat → father. Always one of each.
-            var (motherZone, motherSeat, fatherZone, fatherSeat) =
-                pickedSeat.ZoneId == ZoneIdFor(zones, ZoneSide.Female)
-                    ? (pickedZone, pickedSeat, mirrorZone, mirrorSeat)
-                    : (mirrorZone, mirrorSeat, pickedZone, pickedSeat);
+                // Belt-and-suspenders: explicit row lock on both seats. Combined with serializable
+                // isolation this makes the conflict check below race-free even if the DB engine
+                // chooses to relax serializable to snapshot under load.
+                await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT 1 FROM seats WHERE id = ANY({new[] { pickedSeat.Id, mirrorSeat.Id }}) FOR UPDATE", ct);
 
-            _db.BookingItems.Add(NewItem(booking.Id, motherZone, motherSeat, ParentRole.Mother, holdExpires));
-            _db.BookingItems.Add(NewItem(booking.Id, fatherZone, fatherSeat, ParentRole.Father, holdExpires));
+                var conflict = await _db.BookingItems
+                    .Where(bi => (bi.SeatId == pickedSeat.Id || bi.SeatId == mirrorSeat.Id)
+                                 && bi.Booking!.Status != BookingStatus.Cancelled
+                                 && bi.Booking.Status != BookingStatus.Expired
+                                 && (bi.Booking.Status == BookingStatus.Confirmed
+                                     || bi.HoldExpiresAt > now))
+                    .Select(bi => bi.SeatId)
+                    .ToListAsync(ct);
+                if (conflict.Count > 0)
+                    throw new ConflictException("seat_taken", "That seat is no longer available.",
+                        new { zone = pickedZoneCode.ToString(), row = request.RowLabel, seat = request.SeatNumber });
 
-            await _db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+                booking = new Booking
+                {
+                    StudentId = studentId,
+                    EventId = ev.Id,
+                    Status = BookingStatus.Cart,
+                    GroupChosen = request.Group
+                };
+                _db.Bookings.Add(booking);
+
+                _db.BookingItems.Add(NewItem(booking.Id, motherZone, motherSeat, ParentRole.Mother, holdExpires));
+                _db.BookingItems.Add(NewItem(booking.Id, fatherZone, fatherSeat, ParentRole.Father, holdExpires));
+
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                break;
+            }
+            catch (DbUpdateException ex) when (IsSerializationFailure(ex) && attempt < maxAttempts)
+            {
+                _log.LogWarning("Postgres 40001 serialization failure on cart-select attempt {Attempt}; retrying", attempt);
+                _db.ChangeTracker.Clear();
+            }
+            catch (PostgresException pg) when (pg.SqlState == "40001" && attempt < maxAttempts)
+            {
+                _log.LogWarning("Postgres 40001 on cart-select attempt {Attempt}; retrying", attempt);
+                _db.ChangeTracker.Clear();
+            }
         }
 
         await BroadcastAsync(ev.Id, request.Group, ZoneSide.Female, motherSeatIdFor(pickedSeat, mirrorSeat, zones), "held", ct);
@@ -392,6 +417,13 @@ public class BookingService : IBookingService
 
     private static string NewTicketNumber() =>
         $"KFS{DateTime.UtcNow:yyMMdd}{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
+
+    private static bool IsSerializationFailure(DbUpdateException ex)
+    {
+        for (var e = ex.InnerException; e != null; e = e.InnerException)
+            if (e is PostgresException pg && pg.SqlState == "40001") return true;
+        return false;
+    }
 
     private static BookingDto Map(Booking b) => new(
         b.Id,

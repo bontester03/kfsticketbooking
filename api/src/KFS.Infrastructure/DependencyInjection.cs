@@ -22,9 +22,10 @@ public static class DependencyInjection
         var connectionString = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
-        services.AddDbContext<KfsDbContext>(opt =>
-            opt.UseNpgsql(connectionString, npg =>
-                npg.MigrationsAssembly(typeof(KfsDbContext).Assembly.FullName)));
+        services.AddDbContext<KfsDbContext>(opt => opt
+            .UseNpgsql(connectionString, npg =>
+                npg.MigrationsAssembly(typeof(KfsDbContext).Assembly.FullName))
+            .UseSnakeCaseNamingConvention());
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<KfsDbContext>());
 
@@ -37,9 +38,15 @@ public static class DependencyInjection
         services.AddScoped<IExcelStudentImporter, ExcelStudentImporter>();
         services.AddScoped<IPassPdfRenderer, PassPdfRenderer>();
         services.AddScoped<ITicketEmailRenderer, TicketEmailRenderer>();
-        services.AddScoped<IBlobStorage, LocalDiskBlobStorage>();
 
-        // Email — Console renderer by default; SendGrid is wired in API layer when configured.
+        // Storage backend: AzureBlob (prod / Azurite local) or LocalDisk fallback.
+        var storageProvider = config.GetValue<string>("Storage:Provider") ?? "LocalDisk";
+        if (string.Equals(storageProvider, "AzureBlob", StringComparison.OrdinalIgnoreCase))
+            services.AddSingleton<IBlobStorage, AzureBlobStorage>();
+        else
+            services.AddSingleton<IBlobStorage, LocalDiskBlobStorage>();
+
+        // Email — Console renderer by default; SendGrid/ACS swap-in lives in API layer.
         services.AddScoped<IEmailService, ConsoleEmailService>();
 
         var jwtSection = config.GetSection(JwtSettings.SectionName);

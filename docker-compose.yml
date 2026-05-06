@@ -20,6 +20,17 @@ services:
     networks:
       - kfs
 
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: kfs-azurite
+    command: "azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck"
+    ports:
+      - "${AZURITE_BLOB_PORT:-10000}:10000"
+    volumes:
+      - azurite-data:/data
+    networks:
+      - kfs
+
   api:
     build:
       context: ./api
@@ -28,9 +39,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      azurite:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
+      WEBSITE_TIME_ZONE: Arabian Standard Time
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-kfs};Username=${POSTGRES_USER:-kfs};Password=${POSTGRES_PASSWORD:-kfs}"
       Jwt__Issuer: ${JWT_ISSUER:-kfs}
       Jwt__Audience: ${JWT_AUDIENCE:-kfs-clients}
@@ -45,6 +59,10 @@ services:
       Cors__AllowedOrigins__2: ${WEB_SCANNER_ORIGIN:-http://localhost:5175}
       Database__RunMigrationsOnStartup: "true"
       Swagger__Enabled: ${SWAGGER_ENABLED:-true}
+      # Azurite-backed blob storage for local dev (matches Azure prod path).
+      Storage__Provider: AzureBlob
+      Storage__ConnectionString: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      Storage__Container: qr-codes
     ports:
       - "${API_PORT:-5080}:8080"
     volumes:
@@ -55,6 +73,7 @@ services:
 
 volumes:
   postgres-data:
+  azurite-data:
   api-data:
   api-logs:
 

@@ -1,6 +1,6 @@
 # KFS School Event — Ticket Booking & QR Verification Platform
 
-Reference implementation of [kfs_ticket_booking_prompt_v2.md](kfs_ticket_booking_prompt_v2.md). For every architectural choice see [DECISIONS.md](DECISIONS.md).
+Reference implementation of [kfs_ticket_booking_prompt_v2 (1).md](kfs_ticket_booking_prompt_v2%20%281%29.md) (the spec that supersedes the original v2). Every architectural call is captured in [DECISIONS.md](DECISIONS.md).
 
 > **Build status (this commit)**
 > - ✅ Backend: complete (.NET 8 + EF Core + PostgreSQL via Npgsql, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
@@ -150,17 +150,67 @@ dotnet ef database update \
 | `Database__RunMigrationsOnStartup` | `true` for self-managed deploys                      |
 | `Swagger__Enabled`        | `false` in production                                         |
 
-## Deploying to Railway
+## Deploying to Azure UAE North
 
-1. Push the repo to GitHub.
-2. In Railway → **New Project → Deploy from GitHub repo** → pick `bontester03/kfsticketbooking`.
-3. The first service is the API: set **Root Directory = `api`**. Railway picks up [api/Dockerfile](api/Dockerfile) + [api/railway.json](api/railway.json).
-4. **+ Add Database → PostgreSQL** — Railway exposes `DATABASE_URL` automatically.
-5. On the api service → **Variables**, set `DATABASE_URL=${{ Postgres.DATABASE_URL }}`. The API parses the URL into Npgsql key=value form on startup ([Program.cs](api/src/KFS.Api/Program.cs) → `NormalizeConnectionString`). Add the `Jwt__Secret`, `Qr__SigningKey`, etc. from the env list above.
-6. **Settings → Networking → Generate Domain** to get the public API URL.
-7. Push to `main`. The API auto-deploys, runs migrations, and seeds.
+The full footprint (App Service, Postgres Flex, Storage, Key Vault, App Insights, three Static Web Apps) is described in Bicep at [infra/main.bicep](infra/main.bicep) — see [infra/README.md](infra/README.md) for the manual deploy commands.
 
-The frontends (`portal`, `admin`, `scanner`) — once shipped — will live under `web/apps/*` and each becomes its own Railway service with `Root Directory` pointing at that subfolder.
+### Automated deploy via GitHub Actions (OIDC)
+
+[.github/workflows/deploy.yml](.github/workflows/deploy.yml) runs `what-if`, applies the Bicep, publishes the API, and smoke-tests `/healthz`. To enable:
+
+1. **Create an Azure AD app registration** with federated credentials for this repo. The app needs Contributor on the resource group and User Access Administrator if you want it to grant the App Service Managed Identity its KV/Storage RBAC roles.
+2. In GitHub repo settings, add these **environment secrets** (one set per `dev`, `prod`):
+   - `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
+   - `AZURE_RESOURCE_GROUP` (e.g. `rg-kfs-prod`)
+   - `POSTGRES_ADMIN_PASSWORD`, `JWT_SECRET`, `QR_SIGNING_KEY`, `SUPER_ADMIN_PASSWORD`
+3. Add a repo **variable** `AZURE_APP_NAME` (e.g. `app-kfs-prod-uaen`).
+4. Push to `main` — the workflow runs `az deployment group what-if` first, then applies.
+
+### Manual deploy (one shot)
+
+```bash
+az login
+az group create --name rg-kfs-prod --location uaenorth
+
+export POSTGRES_ADMIN_PASSWORD='...'
+export JWT_SECRET='...'
+export QR_SIGNING_KEY='...'
+export SUPER_ADMIN_PASSWORD='...'
+
+az deployment group create \
+  --resource-group rg-kfs-prod \
+  --template-file infra/main.bicep \
+  --parameters infra/prod.bicepparam
+```
+
+After Bicep applies, publish the API:
+
+```bash
+cd api
+dotnet publish src/KFS.Api -c Release -o ./publish
+zip -r api.zip publish
+az webapp deploy --resource-group rg-kfs-prod --name app-kfs-prod-uaen --src-path api.zip --type zip
+```
+
+Watch `/healthz` come green:
+
+```bash
+curl https://<api-public-host>/healthz
+```
+
+### What lands in Azure
+
+| Resource                          | Region        | Purpose                                                  |
+| --------------------------------- | ------------- | -------------------------------------------------------- |
+| Resource group                    | UAE North     | All PII-bearing resources                                |
+| App Service Plan + Web App        | UAE North     | API host, .NET 8 Linux                                   |
+| Postgres Flexible Server (v16)    | UAE North     | citext / pgcrypto / pg_trgm enabled                      |
+| Storage Account                   | UAE North     | Containers `qr-codes`, `printable-batches`               |
+| Key Vault                         | UAE North     | JWT, QR, super-admin, Postgres connection string         |
+| Application Insights              | UAE North     | Wired via `APPLICATIONINSIGHTS_CONNECTION_STRING`        |
+| Static Web App × 3                | centralus     | `portal`, `admin`, `scanner` (SWA not yet GA in UAE N)   |
+
+The App Service uses **Managed Identity** for KV + Storage access. App Settings reference KV via `@Microsoft.KeyVault(...)` — secrets never appear in the App Settings blade plaintext.
 
 ## What's deferred (next passes)
 
