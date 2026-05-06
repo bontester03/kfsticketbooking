@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="11.9.0" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.9.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\KfsBooking.Domain\KfsBooking.Domain.csproj" />
+  </ItemGroup>
+</Project>

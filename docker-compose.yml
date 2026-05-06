@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kfsbooking-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kfsbooking}
+      POSTGRES_USER: ${POSTGRES_USER:-kfsbooking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kfsbooking}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kfsbooking} -d ${POSTGRES_DB:-kfsbooking}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kfsbooking
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: kfsbooking-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-kfsbooking};Username=${POSTGRES_USER:-kfsbooking};Password=${POSTGRES_PASSWORD:-kfsbooking}
+      Jwt__Issuer: ${JWT_ISSUER:-kfsbooking}
+      Jwt__Audience: ${JWT_AUDIENCE:-kfsbooking-clients}
+      Jwt__Secret: ${JWT_SECRET:-please-change-me-to-a-long-random-secret-32+chars}
+      Jwt__ExpiryMinutes: ${JWT_EXPIRY_MINUTES:-480}
+      Cors__AllowedOrigins__0: ${WEB_ORIGIN:-http://localhost:8080}
+      Database__RunMigrationsOnStartup: "true"
+      Swagger__Enabled: ${SWAGGER_ENABLED:-true}
+    ports:
+      - "${API_PORT:-5080}:8080"
+    networks:
+      - kfsbooking
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: kfsbooking-web
+    depends_on:
+      - api
+    environment:
+      PORT: "80"
+      API_URL: ${WEB_API_URL:-/api}
+      LOCAL_API_UPSTREAM: http://api:8080/api/
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    networks:
+      - kfsbooking
+
+volumes:
+  postgres-data:
+
+networks:
+  kfsbooking:
+    driver: bridge

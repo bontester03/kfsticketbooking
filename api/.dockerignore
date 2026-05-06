@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/*.user
+**/logs/
+**/.idea/
+**/node_modules/
+Dockerfile
+.dockerignore
