@@ -48,7 +48,7 @@
   /* ===== Venue floor plan (matches booking stage KFS.pdf) =================== */
 
   .venue {
-    @apply mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 text-sm;
+    @apply mx-auto flex w-full flex-col gap-4 p-4 text-sm;
   }
 
   .venue-stage {
@@ -70,10 +70,10 @@
 
   .venue-vip-row {
     grid-row: 1; grid-column: 1;
-    /* Stacked vertically so each VIP block gets the full container width — needed so the
-       19 seats per row sit on one line without wrapping. The PDF shows VIP B and VIP A
-       side-by-side; trade that for layout fidelity in favour of legibility. */
-    @apply grid grid-cols-1 gap-3;
+    /* VIP B and VIP A side-by-side, matching the PDF floor plan. Seats use
+       `flex-1 basis-0` so they share whatever width the side has — no scrollbar.
+       Below the lg breakpoint they stack vertically as a fallback for narrow viewports. */
+    @apply grid grid-cols-1 gap-3 lg:grid-cols-2;
   }
 
   .venue-vip {
