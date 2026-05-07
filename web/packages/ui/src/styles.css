@@ -70,7 +70,10 @@
 
   .venue-vip-row {
     grid-row: 1; grid-column: 1;
-    @apply grid grid-cols-1 gap-3 lg:grid-cols-2;
+    /* Stacked vertically so each VIP block gets the full container width — needed so the
+       19 seats per row sit on one line without wrapping. The PDF shows VIP B and VIP A
+       side-by-side; trade that for layout fidelity in favour of legibility. */
+    @apply grid grid-cols-1 gap-3;
   }
 
   .venue-vip {
@@ -97,11 +100,13 @@
   .venue-row-label {
     @apply w-4 text-center text-[10px] font-bold text-kfs-forest;
   }
-  .venue-row-seats { @apply flex flex-1 flex-wrap gap-[2px]; }
+  /* No wrapping — 19 seats stay on one line. shrink-0 on the seats keeps them from
+     squeezing if the container is slightly narrow; horizontal scroll kicks in below. */
+  .venue-row-seats { @apply flex flex-1 flex-nowrap gap-[3px] overflow-x-auto; }
 
   .venue-seat {
-    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-sm text-[9px] font-semibold
-           leading-none transition-colors select-none px-0.5;
+    @apply inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded text-[10px] font-semibold
+           leading-none transition-colors select-none px-1;
   }
   .venue-seat-available { @apply venue-seat bg-white/95 text-kfs-forest hover:bg-kfs-sage-500 hover:text-white cursor-pointer; }
   .venue-seat-held      { @apply venue-seat bg-kfs-gold-100 text-kfs-gold-700 cursor-not-allowed; }
