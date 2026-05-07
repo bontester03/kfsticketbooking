@@ -108,6 +108,7 @@
   .venue-seat-booked    { @apply venue-seat bg-kfs-forest text-kfs-forest-50 cursor-not-allowed; }
   .venue-seat-picked    { @apply venue-seat bg-kfs-gold text-white ring-2 ring-kfs-gold-700; }
   .venue-seat-mirror    { @apply venue-seat bg-kfs-gold/40 text-kfs-forest ring-1 ring-kfs-gold-700; }
+  .venue-seat-yours     { @apply venue-seat bg-emerald-500 text-white ring-2 ring-emerald-700 cursor-default; }
 
   .venue-right-rail {
     grid-row: 1; grid-column: 2;

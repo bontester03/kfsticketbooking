@@ -3,34 +3,39 @@ import clsx from 'clsx';
 import type { SeatMapDto, SeatMapSeatDto } from '@kfs/types';
 import { SeatStatus, ZoneSide } from '@kfs/types';
 
+interface SeatRef {
+  group: 'A' | 'B';
+  side: ZoneSide;
+  rowLabel: string;
+  seatNumber: number;
+}
+
 interface VenueMapProps {
   groupA: SeatMapDto;
   groupB: SeatMapDto;
-  /** When set, the matching {row+seatNumber, opposite side} on the same group is highlighted. */
-  pendingSelection?: { group: 'A' | 'B'; side: ZoneSide; rowLabel: string; seatNumber: number } | null;
-  onSelect: (args: { group: 'A' | 'B'; side: ZoneSide; rowLabel: string; seatNumber: number; seatId: string }) => void;
-  /** Disable interaction (e.g. while a select mutation is in flight). */
+  /** Seat the user has tentatively picked (client-side only, no API hit yet). */
+  pendingSelection?: SeatRef | null;
+  /** The user's already-confirmed seat (renders distinctively, non-clickable). */
+  confirmedSeat?: SeatRef | null;
+  /** When true, every seat is non-interactive — used after a booking is confirmed. */
+  readOnly?: boolean;
+  /** Disable clicks while a mutation is in flight. */
   disabled?: boolean;
+  /** Called on click when the seat is available and the map isn't read-only. */
+  onSelect: (args: SeatRef & { seatId: string }) => void;
 }
 
 /**
- * Floor-plan view of the KFS auditorium. Mirrors `booking stage KFS.pdf`:
+ * Floor-plan view of the KFS auditorium. Mirrors `booking stage KFS.pdf`.
  *
- *                 ┌─────────── Stage ───────────┐
- *
- *   ┌──── VIP B ────┐   ┌──── VIP A ────┐   ┌Staff ┐
- *   │ Female│ Male  │   │ Female│ Male  │   │      │
- *   │       │       │   │       │       │   │ 100  │
- *   └───────┴───────┘   └───────┴───────┘   └──────┘
- *                                            ┌Media ┐
- *   ┌──────── Guest Zone (600) ────────┐    │ 100  │
- *                                            └──────┘
- *
- * Within each Female / Male pane the 4 × 19 seat grid is rendered as clickable
- * buttons.  Guest / Staff / Media zones are admin-issued QR codes — shown
- * read-only here for orientation.
+ * In booking-mode (`readOnly=false`) clicks fire `onSelect` with the picked seat;
+ * the parent decides whether to commit it. In read-only mode (after the student has
+ * confirmed) all seats are non-interactive and the student's own pair is highlighted
+ * with `venue-seat-yours`.
  */
-export function VenueMap({ groupA, groupB, pendingSelection, onSelect, disabled }: VenueMapProps) {
+export function VenueMap({
+  groupA, groupB, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
+}: VenueMapProps) {
   return (
     <div className="venue">
       <div className="venue-stage">
@@ -45,8 +50,10 @@ export function VenueMap({ groupA, groupB, pendingSelection, onSelect, disabled 
             femaleZone={groupB.femaleZone}
             maleZone={groupB.maleZone}
             pendingSelection={pendingSelection?.group === 'B' ? pendingSelection : null}
-            onSelect={onSelect}
+            confirmedSeat={confirmedSeat?.group === 'B' ? confirmedSeat : null}
+            readOnly={readOnly}
             disabled={disabled}
+            onSelect={onSelect}
           />
           <VipBlock
             label="VIP A"
@@ -54,8 +61,10 @@ export function VenueMap({ groupA, groupB, pendingSelection, onSelect, disabled 
             femaleZone={groupA.femaleZone}
             maleZone={groupA.maleZone}
             pendingSelection={pendingSelection?.group === 'A' ? pendingSelection : null}
-            onSelect={onSelect}
+            confirmedSeat={confirmedSeat?.group === 'A' ? confirmedSeat : null}
+            readOnly={readOnly}
             disabled={disabled}
+            onSelect={onSelect}
           />
         </div>
 
@@ -70,7 +79,7 @@ export function VenueMap({ groupA, groupB, pendingSelection, onSelect, disabled 
         </div>
       </div>
 
-      <Legend />
+      <Legend showYours={!!confirmedSeat} />
     </div>
   );
 }
@@ -81,11 +90,15 @@ interface VipBlockProps {
   femaleZone: SeatMapDto['femaleZone'];
   maleZone: SeatMapDto['maleZone'];
   pendingSelection: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
-  onSelect: VenueMapProps['onSelect'];
+  confirmedSeat: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
+  readOnly?: boolean;
   disabled?: boolean;
+  onSelect: VenueMapProps['onSelect'];
 }
 
-function VipBlock({ label, group, femaleZone, maleZone, pendingSelection, onSelect, disabled }: VipBlockProps) {
+function VipBlock({
+  label, group, femaleZone, maleZone, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
+}: VipBlockProps) {
   return (
     <div className="venue-vip">
       <header className="venue-vip-header">
@@ -98,8 +111,10 @@ function VipBlock({ label, group, femaleZone, maleZone, pendingSelection, onSele
           group={group}
           side={ZoneSide.Female}
           pendingSelection={pendingSelection}
-          onSelect={onSelect}
+          confirmedSeat={confirmedSeat}
+          readOnly={readOnly}
           disabled={disabled}
+          onSelect={onSelect}
         />
         <SidePane
           tone="male"
@@ -107,8 +122,10 @@ function VipBlock({ label, group, femaleZone, maleZone, pendingSelection, onSele
           group={group}
           side={ZoneSide.Male}
           pendingSelection={pendingSelection}
-          onSelect={onSelect}
+          confirmedSeat={confirmedSeat}
+          readOnly={readOnly}
           disabled={disabled}
+          onSelect={onSelect}
         />
       </div>
     </div>
@@ -121,11 +138,15 @@ interface SidePaneProps {
   group: 'A' | 'B';
   side: ZoneSide;
   pendingSelection: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
-  onSelect: VenueMapProps['onSelect'];
+  confirmedSeat: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
+  readOnly?: boolean;
   disabled?: boolean;
+  onSelect: VenueMapProps['onSelect'];
 }
 
-function SidePane({ tone, seats, group, side, pendingSelection, onSelect, disabled }: SidePaneProps) {
+function SidePane({
+  tone, seats, group, side, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
+}: SidePaneProps) {
   const rows = useMemo(() => {
     const grouped = new Map<string, SeatMapSeatDto[]>();
     for (const s of seats) {
@@ -147,36 +168,42 @@ function SidePane({ tone, seats, group, side, pendingSelection, onSelect, disabl
             <span className="venue-row-label">{rowLabel}</span>
             <div className="venue-row-seats">
               {rowSeats.map((seat) => {
-                const isMirror =
-                  pendingSelection &&
-                  pendingSelection.rowLabel === seat.rowLabel &&
-                  pendingSelection.seatNumber === seat.seatNumber &&
-                  pendingSelection.side !== side;
-                const isPicked =
-                  pendingSelection &&
-                  pendingSelection.rowLabel === seat.rowLabel &&
-                  pendingSelection.seatNumber === seat.seatNumber &&
-                  pendingSelection.side === side;
+                const matchesYours =
+                  !!confirmedSeat &&
+                  confirmedSeat.rowLabel === seat.rowLabel &&
+                  confirmedSeat.seatNumber === seat.seatNumber;
 
-                const cls = seat.status === SeatStatus.Booked
-                  ? 'venue-seat venue-seat-booked'
-                  : seat.status === SeatStatus.Held
-                    ? 'venue-seat venue-seat-held'
-                    : isPicked
-                      ? 'venue-seat venue-seat-picked'
-                      : isMirror
-                        ? 'venue-seat venue-seat-mirror'
-                        : 'venue-seat venue-seat-available';
+                const matchesPending =
+                  !!pendingSelection &&
+                  pendingSelection.rowLabel === seat.rowLabel &&
+                  pendingSelection.seatNumber === seat.seatNumber;
+
+                const isPickedThisSide = matchesPending && pendingSelection!.side === side;
+                const isMirrorThisSide = matchesPending && pendingSelection!.side !== side;
+
+                const cls = matchesYours
+                  ? 'venue-seat venue-seat-yours'
+                  : seat.status === SeatStatus.Booked
+                    ? 'venue-seat venue-seat-booked'
+                    : seat.status === SeatStatus.Held
+                      ? 'venue-seat venue-seat-held'
+                      : isPickedThisSide
+                        ? 'venue-seat venue-seat-picked'
+                        : isMirrorThisSide
+                          ? 'venue-seat venue-seat-mirror'
+                          : 'venue-seat venue-seat-available';
+
+                const interactive = !readOnly && !disabled && seat.status === SeatStatus.Available && !matchesYours;
 
                 return (
                   <button
                     key={seat.id}
                     type="button"
                     className={cls}
-                    disabled={disabled || seat.status !== SeatStatus.Available}
-                    onClick={() => onSelect({ group, side, rowLabel: seat.rowLabel, seatNumber: seat.seatNumber, seatId: seat.id })}
+                    disabled={!interactive}
+                    onClick={() => interactive && onSelect({ group, side, rowLabel: seat.rowLabel, seatNumber: seat.seatNumber, seatId: seat.id })}
                     aria-label={`${tone === 'female' ? 'Female' : 'Male'} side, row ${seat.rowLabel}, seat ${seat.seatNumber}`}
-                    title={`${seat.fullLabel}`}
+                    title={matchesYours ? `Your seat — ${seat.fullLabel}` : seat.fullLabel}
                   >
                     {seat.seatNumber}
                   </button>
@@ -199,13 +226,14 @@ function ZoneTile({ title, subtitle, tone }: { title: string; subtitle: string; 
   );
 }
 
-function Legend() {
+function Legend({ showYours }: { showYours: boolean }) {
   return (
     <div className="venue-legend">
       <span><i className="venue-swatch venue-seat-available" /> Available</span>
       <span><i className="venue-swatch venue-seat-held" /> Held</span>
       <span><i className="venue-swatch venue-seat-booked" /> Booked</span>
-      <span><i className="venue-swatch venue-seat-mirror" /> Mirror seat (auto-paired)</span>
+      <span><i className="venue-swatch venue-seat-mirror" /> Auto-paired mirror</span>
+      {showYours && <span><i className="venue-swatch venue-seat-yours" /> Your seat</span>}
     </div>
   );
 }

@@ -74,6 +74,20 @@
     "cancelKeep": "Keep booking",
     "cancelProceed": "Yes, cancel"
   },
+  "rebook": {
+    "pickHint": "Tap any seat in VIP A or VIP B. The opposite-side mirror is auto-paired. Nothing is reserved until you confirm.",
+    "confirmTitle": "Confirm your selection",
+    "confirmDetails": "Group {{group}} · Row {{row}} · Seat {{seat}} (mother and father auto-paired)",
+    "confirmHint": "Tickets and QR codes are generated when you confirm.",
+    "confirmBooking": "Confirm booking",
+    "changeSeat": "Pick a different seat",
+    "confirmedTitle": "Your booking is confirmed",
+    "confirmedSeats": "Reserved: {{seats}}",
+    "readOnlyHint": "The map is read-only. Cancel below to pick a different seat.",
+    "cancelAndPickAgain": "Cancel & pick again",
+    "cancelConfirm": "Cancel this booking? Your seats are released and you can pick a new pair within the rebook window.",
+    "cancelledNowPick": "Booking cancelled. Pick a new seat — your rebook window is open."
+  },
   "errors": {
     "generic": "Something went wrong. Please try again.",
     "seatTaken": "That seat is no longer available — please pick another.",
