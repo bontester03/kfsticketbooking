@@ -13,6 +13,7 @@ export default function MyBookingsPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const displayName = useAuthStore((s) => s.displayName) ?? '';
+  const studentEmail = useAuthStore((s) => s.email) ?? '';
 
   const bookingsQ = useQuery({ queryKey: ['bookings'], queryFn: api.bookings.list });
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
@@ -52,12 +53,13 @@ export default function MyBookingsPage() {
   return (
     <div className="grid gap-6">
       <h1 className="text-xl font-semibold text-kfs-forest">{t('myBookings.title')}</h1>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4">
         {confirmed.items.map((item) => (
           <TicketCard
             key={item.id}
             item={item}
             studentName={displayName}
+            studentEmail={studentEmail}
             parentLabel={item.parentRole === 0 ? 'Mother' : 'Father'}
             group={groupLetter}
           />

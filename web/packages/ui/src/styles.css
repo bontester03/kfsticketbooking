@@ -171,4 +171,65 @@
     .venue-right-rail { grid-row: auto; grid-column: 1; flex-direction: row; width: auto; }
     .venue-zone-tile { min-height: 5rem; }
   }
+
+  /* ===== Ticket card (matches printed reference: stub + receipt + perforation) ====== */
+
+  .ticket {
+    @apply relative grid rounded-xl bg-white shadow-md ring-1 ring-slate-200 text-slate-800;
+    grid-template-columns: 1.7fr 1fr;
+    min-height: 18rem;
+  }
+  /* Circular cut-outs at the perforation height — colour matches the page background
+     so they look like a tear edge. Adjust if the surrounding background changes. */
+  .ticket-notch {
+    @apply pointer-events-none absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full;
+    background: #f0f5f3;
+  }
+  .ticket-notch-left  { left: -0.75rem; }
+  .ticket-notch-right { right: -0.75rem; }
+
+  .ticket-stub {
+    @apply flex flex-col gap-3 p-6;
+    border-right: 2px dashed #cbd5e1;  /* slate-300 dashed perforation */
+  }
+
+  .ticket-num     { @apply text-base font-medium tracking-widest text-slate-700; }
+  .ticket-rule    { @apply border-t border-slate-200; }
+
+  .ticket-label   { @apply text-[11px] font-bold uppercase tracking-wider text-slate-500; }
+  .ticket-value   { @apply text-2xl font-bold leading-tight text-slate-900; }
+
+  /* Violet "A"/"B" badge per the reference. Deliberate deviation from the brand palette
+     for accessibility / category disambiguation; documented choice. */
+  .ticket-category {
+    @apply mt-1 inline-flex h-12 w-14 items-center justify-center rounded-md bg-violet-500 text-2xl font-bold text-white shadow-sm;
+  }
+
+  .ticket-info-grid { @apply grid grid-cols-4 gap-x-4; }
+
+  .ticket-arabic {
+    @apply pt-1 text-base leading-relaxed text-slate-700;
+    font-family: 'IBM Plex Sans Arabic', Tahoma, sans-serif;
+  }
+
+  .ticket-parent-line { @apply text-xs italic text-slate-500; }
+
+  /* Right-half receipt: clock icon + email + QR */
+  .ticket-receipt {
+    @apply flex flex-col items-center justify-center gap-2 p-6 text-center;
+  }
+  .ticket-clock        { @apply mb-2 h-10 w-10 text-amber-500; }
+  .ticket-receipt-line { @apply text-sm leading-snug text-slate-700; }
+  .ticket-email        { @apply break-all text-sm font-bold text-slate-900; }
+  .ticket-qr-label     { @apply mt-3 text-base text-slate-700; }
+  .ticket-qr           { @apply mt-2 h-32 w-32 rounded ring-1 ring-slate-200; }
+  .ticket-qr-missing   { @apply flex items-center justify-center bg-slate-50 text-xs text-slate-500; }
+
+  /* Stack vertically on narrow screens; the stub sits above the receipt. */
+  @media (max-width: 640px) {
+    .ticket { grid-template-columns: 1fr; }
+    .ticket-stub { border-right: none; border-bottom: 2px dashed #cbd5e1; }
+    .ticket-notch-left  { top: auto; bottom: -0.75rem; left: 50%; transform: translateX(-50%); }
+    .ticket-notch-right { top: auto; bottom: -0.75rem; right: 50%; transform: translateX(50%); display: none; }
+  }
 }
