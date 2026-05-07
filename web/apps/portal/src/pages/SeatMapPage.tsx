@@ -53,7 +53,7 @@ export default function SeatMapPage() {
   const groupB = groupBQ?.data;
 
   const confirmed = bookingsQ.data?.find(b => b.status === BookingStatus.Confirmed);
-  const motherOfConfirmed = confirmed?.items.find(i => i.parentRole === ParentRole.Mother);
+  const motherOfConfirmed = confirmed?.items?.find(i => i.parentRole === ParentRole.Mother);
   const confirmedSeat: SeatRef | null = confirmed && motherOfConfirmed
     ? {
         group: confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B',
@@ -63,9 +63,11 @@ export default function SeatMapPage() {
       }
     : null;
 
-  const cart = cartQ.data;
+  // Be paranoid here: even though api.cart.get() coerces 204 to null, a stray non-object
+  // returned from another path (cache hydration, etc.) shouldn't crash the page.
+  const cart = cartQ.data && typeof cartQ.data === 'object' ? cartQ.data : null;
   const cartActive = !!cart && cart.status === BookingStatus.Cart;
-  const motherOfCart = cart?.items.find(i => i.parentRole === ParentRole.Mother);
+  const motherOfCart = cart?.items?.find(i => i.parentRole === ParentRole.Mother);
   const cartSeat: SeatRef | null = cartActive && motherOfCart
     ? {
         group: cart!.groupChosen === ZoneGroup.A ? 'A' : 'B',

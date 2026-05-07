@@ -26,10 +26,10 @@ export const endpoints = {
   }),
 
   cart: (c: AxiosInstance) => ({
-    // The API returns 204 No Content when there's no cart. Axios then leaves r.data
-    // undefined, which TanStack Query v5 rejects as a query result — coerce to null so
-    // queries downstream can branch on a real falsy value instead of crashing the app.
-    get: () => c.get<BookingDto | null>('/cart').then(r => r.data ?? null),
+    // API returns 204 No Content when there's no cart. Axios surfaces that as either
+    // r.data === undefined OR r.data === '' depending on transformResponse — both crash
+    // downstream code that does `cart?.items.find(...)`. Coerce strictly on status.
+    get: () => c.get<BookingDto | null>('/cart').then(r => r.status === 204 ? null : (r.data ?? null)),
     select: (group: ZoneGroup, side: ZoneSide, rowLabel: string, seatNumber: number) =>
       c.post<BookingDto>('/cart/select', { group, side, rowLabel, seatNumber }).then(r => r.data),
     release: () => c.delete<void>('/cart').then(r => r.data),
