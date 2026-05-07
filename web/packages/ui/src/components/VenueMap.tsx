@@ -181,16 +181,19 @@ function SidePane({
                 const isPickedThisSide = matchesPending && pendingSelection!.side === side;
                 const isMirrorThisSide = matchesPending && pendingSelection!.side !== side;
 
+                // The user's own holds (cart) and confirmed seats win over the generic
+                // booked/held styling — that way they can always see their own pair clearly
+                // even though the seat is also Held in the API response from their own hold.
                 const cls = matchesYours
                   ? 'venue-seat venue-seat-yours'
-                  : seat.status === SeatStatus.Booked
-                    ? 'venue-seat venue-seat-booked'
-                    : seat.status === SeatStatus.Held
-                      ? 'venue-seat venue-seat-held'
-                      : isPickedThisSide
-                        ? 'venue-seat venue-seat-picked'
-                        : isMirrorThisSide
-                          ? 'venue-seat venue-seat-mirror'
+                  : isPickedThisSide
+                    ? 'venue-seat venue-seat-picked'
+                    : isMirrorThisSide
+                      ? 'venue-seat venue-seat-mirror'
+                      : seat.status === SeatStatus.Booked
+                        ? 'venue-seat venue-seat-booked'
+                        : seat.status === SeatStatus.Held
+                          ? 'venue-seat venue-seat-held'
                           : 'venue-seat venue-seat-available';
 
                 const interactive = !readOnly && !disabled && seat.status === SeatStatus.Available && !matchesYours;

@@ -75,7 +75,10 @@
     "cancelProceed": "Yes, cancel"
   },
   "rebook": {
-    "pickHint": "Tap any seat in VIP A or VIP B. The opposite-side mirror is auto-paired. Nothing is reserved until you confirm.",
+    "pickHint": "Tap any seat in VIP A or VIP B. The opposite-side mirror is auto-paired. The seat is held for 10 minutes for you to confirm.",
+    "cartTitle": "Seat held for you",
+    "cartHint": "Confirm before the timer runs out, or release to pick another seat.",
+    "expiresIn": "Time left:",
     "confirmTitle": "Confirm your selection",
     "confirmDetails": "Group {{group}} · Row {{row}} · Seat {{seat}} (mother and father auto-paired)",
     "confirmHint": "Tickets and QR codes are generated when you confirm.",

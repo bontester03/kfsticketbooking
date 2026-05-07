@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Button, Card, LoadingPanel, VenueMap } from '@kfs/ui';
+import { Button, Card, CountdownPill, LoadingPanel, VenueMap } from '@kfs/ui';
 import { useTranslation } from '@kfs/i18n';
 import type { ApiError } from '@kfs/types';
 import { BookingStatus, ParentRole, ZoneGroup, ZoneSide } from '@kfs/types';
@@ -10,12 +9,24 @@ import { api } from '../api';
 
 type SeatRef = { group: 'A' | 'B'; side: ZoneSide; rowLabel: string; seatNumber: number };
 
+const SEATMAP_REFETCH_MS = 5_000;
+
 export default function SeatMapPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const qc = useQueryClient();
 
   const eventQ = useQuery({ queryKey: ['events', 'active'], queryFn: api.events.active });
+
+  // Cart lives on the server (so other students see the hold). Poll it so a release/expiry
+  // from the background sweeper is reflected promptly.
+  const cartQ = useQuery({
+    queryKey: ['cart'],
+    queryFn: api.cart.get,
+    refetchInterval: SEATMAP_REFETCH_MS,
+    staleTime: 0
+  });
+
   const bookingsQ = useQuery({ queryKey: ['bookings'], queryFn: api.bookings.list });
 
   const groupQs = useQueries({
@@ -24,13 +35,16 @@ export default function SeatMapPage() {
         queryKey: ['seatmap', eventQ.data?.id, ZoneGroup.A],
         queryFn: () => api.events.seatMap(eventQ.data!.id, ZoneGroup.A),
         enabled: !!eventQ.data,
-        staleTime: 0
+        staleTime: 0,
+        // Poll so other students appear as Held/Booked without needing manual refresh.
+        refetchInterval: SEATMAP_REFETCH_MS
       },
       {
         queryKey: ['seatmap', eventQ.data?.id, ZoneGroup.B],
         queryFn: () => api.events.seatMap(eventQ.data!.id, ZoneGroup.B),
         enabled: !!eventQ.data,
-        staleTime: 0
+        staleTime: 0,
+        refetchInterval: SEATMAP_REFETCH_MS
       }
     ]
   });
@@ -39,48 +53,68 @@ export default function SeatMapPage() {
   const groupB = groupBQ?.data;
 
   const confirmed = bookingsQ.data?.find(b => b.status === BookingStatus.Confirmed);
-  const motherItem = confirmed?.items.find(i => i.parentRole === ParentRole.Mother);
-  const confirmedSeat: SeatRef | null = confirmed && motherItem
+  const motherOfConfirmed = confirmed?.items.find(i => i.parentRole === ParentRole.Mother);
+  const confirmedSeat: SeatRef | null = confirmed && motherOfConfirmed
     ? {
         group: confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B',
         side: ZoneSide.Female,
-        rowLabel: motherItem.rowLabel,
-        seatNumber: motherItem.seatNumber
+        rowLabel: motherOfConfirmed.rowLabel,
+        seatNumber: motherOfConfirmed.seatNumber
       }
     : null;
 
-  const [pending, setPending] = useState<SeatRef | null>(null);
+  const cart = cartQ.data;
+  const cartActive = !!cart && cart.status === BookingStatus.Cart;
+  const motherOfCart = cart?.items.find(i => i.parentRole === ParentRole.Mother);
+  const cartSeat: SeatRef | null = cartActive && motherOfCart
+    ? {
+        group: cart!.groupChosen === ZoneGroup.A ? 'A' : 'B',
+        side: ZoneSide.Female,
+        rowLabel: motherOfCart.rowLabel,
+        seatNumber: motherOfCart.seatNumber
+      }
+    : null;
 
-  // Two-step commit: reserve the seat (cart/select) then immediately checkout.
-  // The cart's 10-min hold is mostly transient here — if checkout throws we release
-  // the cart so seats free up for someone else right away.
-  const confirm = useMutation({
-    mutationFn: async (sel: SeatRef) => {
-      await api.cart.select(
+  // ---- mutations ----
+
+  const select = useMutation({
+    mutationFn: (sel: SeatRef) =>
+      api.cart.select(
         sel.group === 'A' ? ZoneGroup.A : ZoneGroup.B,
         sel.side,
         sel.rowLabel,
         sel.seatNumber
-      );
-      try {
-        return await api.cart.checkout();
-      } catch (e) {
-        await api.cart.release().catch(() => undefined);
-        throw e;
-      }
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['cart'] });
+      void qc.invalidateQueries({ queryKey: ['seatmap'] });
     },
+    onError: (e: ApiError) => {
+      toast.error(e?.code === 'seat_taken' ? t('errors.seatTaken') : (e?.message ?? t('errors.generic')));
+      void qc.invalidateQueries({ queryKey: ['seatmap'] });
+    }
+  });
+
+  const release = useMutation({
+    mutationFn: api.cart.release,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['cart'] });
+      void qc.invalidateQueries({ queryKey: ['seatmap'] });
+    }
+  });
+
+  const checkout = useMutation({
+    mutationFn: api.cart.checkout,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['bookings'] });
       void qc.invalidateQueries({ queryKey: ['cart'] });
       void qc.invalidateQueries({ queryKey: ['seatmap'] });
       toast.success(t('confirmation.title'));
-      setPending(null);
       navigate('/bookings');
     },
     onError: (e: ApiError) => {
-      toast.error(e?.code === 'seat_taken' ? t('errors.seatTaken') : (e?.message ?? t('errors.generic')));
-      setPending(null);
-      void qc.invalidateQueries({ queryKey: ['seatmap'] });
+      toast.error(e?.code === 'cart_expired' ? t('errors.cartExpired') : (e?.message ?? t('errors.generic')));
+      void qc.invalidateQueries({ queryKey: ['cart'] });
     }
   });
 
@@ -93,11 +127,15 @@ export default function SeatMapPage() {
     }
   });
 
-  if (eventQ.isLoading || bookingsQ.isLoading || !groupA || !groupB) return <LoadingPanel />;
+  if (eventQ.isLoading || bookingsQ.isLoading || cartQ.isLoading || !groupA || !groupB) {
+    return <LoadingPanel />;
+  }
 
-  return (
-    <div className="grid gap-4">
-      {confirmed ? (
+  // ---- view states ----
+
+  if (confirmed) {
+    return (
+      <div className="grid gap-4">
         <Card className="border-l-4 border-emerald-500">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -115,9 +153,7 @@ export default function SeatMapPage() {
                 variant="danger"
                 loading={cancelBooking.isPending}
                 onClick={() => {
-                  if (window.confirm(String(t('rebook.cancelConfirm')))) {
-                    cancelBooking.mutate();
-                  }
+                  if (window.confirm(String(t('rebook.cancelConfirm')))) cancelBooking.mutate();
                 }}
               >
                 {t('rebook.cancelAndPickAgain')}
@@ -125,47 +161,78 @@ export default function SeatMapPage() {
             </div>
           </div>
         </Card>
-      ) : pending ? (
+
+        <VenueMap groupA={groupA} groupB={groupB} confirmedSeat={confirmedSeat} readOnly onSelect={() => undefined} />
+      </div>
+    );
+  }
+
+  if (cartActive && cartSeat && motherOfCart) {
+    const expiresAt = motherOfCart.holdExpiresAt;
+    return (
+      <div className="grid gap-4">
         <Card className="border-l-4 border-kfs-gold">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-kfs-forest">{t('rebook.confirmTitle')}</h2>
+              <h2 className="text-base font-semibold text-kfs-forest">{t('rebook.cartTitle')}</h2>
               <p className="mt-1 text-sm text-kfs-sage-700">
                 {t('rebook.confirmDetails', {
-                  group: pending.group,
-                  row: pending.rowLabel,
-                  seat: pending.seatNumber
+                  group: cartSeat.group,
+                  row: cartSeat.rowLabel,
+                  seat: cartSeat.seatNumber
                 })}
               </p>
-              <p className="mt-1 text-xs text-kfs-sage-700">{t('rebook.confirmHint')}</p>
+              <p className="mt-1 text-xs text-kfs-sage-700">{t('rebook.cartHint')}</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setPending(null)} disabled={confirm.isPending}>
-                {t('rebook.changeSeat')}
-              </Button>
-              <Button onClick={() => confirm.mutate(pending)} loading={confirm.isPending}>
-                {t('rebook.confirmBooking')}
-              </Button>
+            <div className="flex items-center gap-3">
+              <CountdownPill
+                expiresAt={expiresAt}
+                onExpire={() => qc.invalidateQueries({ queryKey: ['cart'] })}
+                prefix={String(t('rebook.expiresIn'))}
+              />
             </div>
           </div>
+          <div className="mt-4 flex gap-2">
+            <Button onClick={() => checkout.mutate()} loading={checkout.isPending}>
+              {t('rebook.confirmBooking')}
+            </Button>
+            <Button variant="secondary" onClick={() => release.mutate()} loading={release.isPending} disabled={checkout.isPending}>
+              {t('rebook.changeSeat')}
+            </Button>
+          </div>
         </Card>
-      ) : (
-        <Card>
-          <h1 className="text-xl font-semibold text-kfs-forest">{t('seatMap.title')}</h1>
-          <p className="mt-1 text-sm text-kfs-sage-700">{t('rebook.pickHint')}</p>
-        </Card>
-      )}
+
+        <VenueMap
+          groupA={groupA}
+          groupB={groupB}
+          pendingSelection={cartSeat}
+          disabled
+          onSelect={() => undefined}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      <Card>
+        <h1 className="text-xl font-semibold text-kfs-forest">{t('seatMap.title')}</h1>
+        <p className="mt-1 text-sm text-kfs-sage-700">{t('rebook.pickHint')}</p>
+      </Card>
 
       <VenueMap
         groupA={groupA}
         groupB={groupB}
-        pendingSelection={pending}
-        confirmedSeat={confirmedSeat}
-        readOnly={!!confirmed}
-        disabled={confirm.isPending || cancelBooking.isPending}
+        disabled={select.isPending}
         onSelect={(args) => {
-          if (confirmed) return;
-          setPending({ group: args.group, side: args.side, rowLabel: args.rowLabel, seatNumber: args.seatNumber });
+          // Optimistically reserve on the server — other students immediately see this seat
+          // as Held. The cart query refetch then drives the confirm-bar to appear.
+          select.mutate({
+            group: args.group,
+            side: args.side,
+            rowLabel: args.rowLabel,
+            seatNumber: args.seatNumber
+          });
         }}
       />
     </div>
