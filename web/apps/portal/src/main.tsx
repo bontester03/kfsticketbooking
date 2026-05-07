@@ -12,7 +12,7 @@ import '@kfs/ui/styles.css';
 
 import App from './App';
 
-initI18n({ defaultLocale: 'ar', app: 'portal' });
+initI18n({ defaultLocale: 'en', app: 'portal' });
 
 const queryClient = new QueryClient({
   defaultOptions: {
