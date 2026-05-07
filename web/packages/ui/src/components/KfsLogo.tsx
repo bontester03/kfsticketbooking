@@ -22,11 +22,11 @@ export function KfsLogo({ variant = 'full', className }: KfsLogoProps) {
       {variant !== 'emblem' && (
         <span className="flex flex-col leading-tight">
           {variant !== 'english' && (
-            <span className="text-sm font-bold text-kfs-forest font-arabic">مدرسة الفيصلية</span>
+            <span className="text-sm font-bold text-kfs-forest font-arabic">مدرسة الملك فيصل</span>
           )}
           {variant !== 'arabic' && (
             <span className="text-xs font-semibold uppercase tracking-wider text-kfs-sage-700">
-              Al Faisaliah School
+              King Faisal School
             </span>
           )}
         </span>
