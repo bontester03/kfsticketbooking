@@ -41,7 +41,7 @@ export default function CartPage() {
     return (
       <EmptyState
         title={t('dashboard.noBooking')}
-        action={<Button onClick={() => navigate('/book/group')}>{t('dashboard.bookNow')}</Button>}
+        action={<Button onClick={() => navigate('/book')}>{t('dashboard.bookNow')}</Button>}
       />
     );
   }

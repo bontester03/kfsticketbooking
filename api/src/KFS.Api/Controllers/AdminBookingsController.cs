@@ -38,7 +38,9 @@ public class AdminBookingsController : ControllerBase
             b.Items.Select(i => new BookingItemDto(i.Id, i.SeatId,
                 Application.Services.BookingService.BlockLabel(i.Zone?.Code ?? ZoneCode.VIPAF),
                 i.Seat?.RowLabel ?? "", i.Seat?.SeatNumber ?? 0, i.Seat?.FullLabel ?? "",
-                i.ParentRole, i.TicketNumber, i.QrCodeImageUrl, i.EmailSent, i.HoldExpiresAt)).ToList())).ToList();
+                i.ParentRole, i.TicketNumber,
+                i.QrCodeImageUrl?.Replace("http://azurite:10000", "http://localhost:10000"),
+                i.EmailSent, i.HoldExpiresAt)).ToList())).ToList();
     }
 
     [HttpGet("seatmap")]

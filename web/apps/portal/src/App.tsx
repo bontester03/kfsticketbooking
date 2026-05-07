@@ -23,6 +23,7 @@ export default function App() {
 
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/book" element={<SeatMapPage />} />
           <Route path="/book/group" element={<GroupSelectPage />} />
           <Route path="/book/seats" element={<SeatMapPage />} />
           <Route path="/cart" element={<CartPage />} />

@@ -17,6 +17,10 @@ public class AzureBlobStorage : IBlobStorage
     private readonly string _container;
     private readonly bool _emitSasUrls;
     private readonly TimeSpan _sasLifetime;
+    /// When set, replaces the scheme+host+port of returned blob URLs. Needed in dev because
+    /// the BlobServiceClient is wired to the Docker-internal `http://azurite:10000` hostname
+    /// but the browser running on the host can only reach `http://localhost:10000`.
+    private readonly string? _publicBaseUrl;
     private readonly ILogger<AzureBlobStorage> _log;
 
     public AzureBlobStorage(IConfiguration config, ILogger<AzureBlobStorage> log)
@@ -24,6 +28,7 @@ public class AzureBlobStorage : IBlobStorage
         _log = log;
         _container = config.GetValue<string>("Storage:Container") ?? "qr-codes";
         _sasLifetime = TimeSpan.FromMinutes(config.GetValue<int?>("Storage:SasLifetimeMinutes") ?? 5);
+        _publicBaseUrl = config.GetValue<string>("Storage:PublicBaseUrl");
 
         var connectionString = config.GetValue<string>("Storage:ConnectionString");
         var serviceUri = config.GetValue<string>("Storage:ServiceUri");
@@ -31,8 +36,9 @@ public class AzureBlobStorage : IBlobStorage
         if (!string.IsNullOrWhiteSpace(connectionString))
         {
             _client = new BlobServiceClient(connectionString);
-            // Azurite + connection-string mode: SAS works but plain URLs are fine for local dev.
-            _emitSasUrls = false;
+            // Connection-string mode (Azurite / dev) ships an account key, so the BlobClient
+            // can mint a SAS — the only way to read a Private container without an auth header.
+            _emitSasUrls = true;
         }
         else if (!string.IsNullOrWhiteSpace(serviceUri))
         {
@@ -63,18 +69,24 @@ public class AzureBlobStorage : IBlobStorage
             HttpHeaders = new BlobHttpHeaders { ContentType = contentType }
         }, ct);
 
-        if (!_emitSasUrls) return blob.Uri.ToString();
+        if (!_emitSasUrls) return Public(blob.Uri);
 
         if (!blob.CanGenerateSasUri)
         {
             _log.LogWarning("BlobClient cannot generate user-delegation SAS — returning canonical URL. " +
                             "On Azure with Managed Identity this is expected; clients fetch via the API's SAS endpoint.");
-            return blob.Uri.ToString();
+            return Public(blob.Uri);
         }
 
         // 5-minute SAS by default; long enough for an email client to fetch the inline image.
         var sasUri = blob.GenerateSasUri(BlobSasPermissions.Read, DateTimeOffset.UtcNow.Add(_sasLifetime));
-        return sasUri.ToString();
+        return Public(sasUri);
+    }
+
+    private string Public(Uri internalUri)
+    {
+        if (string.IsNullOrEmpty(_publicBaseUrl)) return internalUri.ToString();
+        return $"{_publicBaseUrl.TrimEnd('/')}{internalUri.PathAndQuery}";
     }
 
     /// Layout: top-level path segment is the container; rest is the blob key.

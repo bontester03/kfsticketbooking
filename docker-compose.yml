@@ -63,6 +63,9 @@ services:
       Storage__Provider: AzureBlob
       Storage__ConnectionString: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       Storage__Container: qr-codes
+      # Browser cannot resolve docker-internal hostname `azurite`; rewrite the host portion
+      # of returned blob URLs to the host-mapped Azurite endpoint so <img src="..."/> works.
+      Storage__PublicBaseUrl: "http://localhost:${AZURITE_BLOB_PORT:-10000}"
     ports:
       - "${API_PORT:-5080}:8080"
     volumes:

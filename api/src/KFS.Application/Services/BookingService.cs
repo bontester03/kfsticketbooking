@@ -438,5 +438,10 @@ public class BookingService : IBookingService
             i.Id, i.SeatId, BlockLabel(i.Zone?.Code ?? ZoneCode.VIPAF),
             i.Seat?.RowLabel ?? string.Empty, i.Seat?.SeatNumber ?? 0,
             i.Seat?.FullLabel ?? string.Empty,
-            i.ParentRole, i.TicketNumber, i.QrCodeImageUrl, i.EmailSent, i.HoldExpiresAt)).ToList());
+            i.ParentRole, i.TicketNumber,
+            // Back-compat: bookings created before Storage:PublicBaseUrl was wired up have
+            // `http://azurite:10000/...` saved in the DB. Rewrite on the way out so the
+            // browser <img> can fetch them without forcing the user to rebook.
+            i.QrCodeImageUrl?.Replace("http://azurite:10000", "http://localhost:10000"),
+            i.EmailSent, i.HoldExpiresAt)).ToList());
 }

@@ -36,7 +36,7 @@ export default function DashboardPage() {
       {!active && (
         <EmptyState
           title={t('dashboard.noBooking')}
-          action={<Link to="/book/group"><Button>{t('dashboard.bookNow')}</Button></Link>}
+          action={<Link to="/book"><Button>{t('dashboard.bookNow')}</Button></Link>}
         />
       )}
 
