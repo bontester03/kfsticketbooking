@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button, Card, EmptyState, LoadingPanel, TicketCard } from '@kfs/ui';
@@ -10,6 +11,7 @@ import { api } from '../api';
 export default function MyBookingsPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const displayName = useAuthStore((s) => s.displayName) ?? '';
 
   const bookingsQ = useQuery({ queryKey: ['bookings'], queryFn: api.bookings.list });
@@ -18,8 +20,14 @@ export default function MyBookingsPage() {
   const cancel = useMutation({
     mutationFn: (id: string) => api.bookings.cancel(id),
     onSuccess: () => {
+      // Refresh the booking list AND the seat map (freed seats reappear), then drop the
+      // student straight onto the picker. The backend's RebookWindow status keeps the
+      // pair held against new takers for the configured cancellation window.
       void qc.invalidateQueries({ queryKey: ['bookings'] });
-      toast.success(t('myBookings.cancel'));
+      void qc.invalidateQueries({ queryKey: ['seatmap'] });
+      void qc.invalidateQueries({ queryKey: ['cart'] });
+      toast.message(t('rebook.cancelledNowPick'));
+      navigate('/book');
     }
   });
 
@@ -31,7 +39,12 @@ export default function MyBookingsPage() {
   if (bookingsQ.isLoading) return <LoadingPanel />;
   const confirmed = bookingsQ.data?.find(b => b.status === BookingStatus.Confirmed);
   if (!confirmed) {
-    return <EmptyState title={t('dashboard.noBooking')} />;
+    return (
+      <EmptyState
+        title={t('dashboard.noBooking')}
+        action={<Button onClick={() => navigate('/book')}>{t('dashboard.bookNow')}</Button>}
+      />
+    );
   }
 
   const groupLetter: 'A' | 'B' = confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B';
@@ -73,8 +86,11 @@ export default function MyBookingsPage() {
               <Button variant="secondary" onClick={() => setConfirmCancelId(null)}>
                 {t('myBookings.cancelKeep')}
               </Button>
-              <Button variant="danger" loading={cancel.isPending}
-                      onClick={() => { cancel.mutate(confirmCancelId); setConfirmCancelId(null); }}>
+              <Button
+                variant="danger"
+                loading={cancel.isPending}
+                onClick={() => { cancel.mutate(confirmCancelId); setConfirmCancelId(null); }}
+              >
                 {t('myBookings.cancelProceed')}
               </Button>
             </div>
