@@ -66,6 +66,10 @@ services:
       # Browser cannot resolve docker-internal hostname `azurite`; rewrite the host portion
       # of returned blob URLs to the host-mapped Azurite endpoint so <img src="..."/> works.
       Storage__PublicBaseUrl: "http://localhost:${AZURITE_BLOB_PORT:-10000}"
+      # Re-signed on every booking response, so a 60-min lifetime is plenty for the page to
+      # load images without the client needing to refresh. Spec says 5 min for prod-style
+      # short-lived SAS — the refresh-on-read mechanism makes longer dev values harmless.
+      Storage__SasLifetimeMinutes: "60"
     ports:
       - "${API_PORT:-5080}:8080"
     volumes:

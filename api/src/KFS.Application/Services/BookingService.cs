@@ -425,23 +425,27 @@ public class BookingService : IBookingService
         return false;
     }
 
-    private static BookingDto Map(Booking b) => new(
-        b.Id,
-        b.StudentId,
-        b.Status,
-        b.GroupChosen,
-        b.CreatedAt,
-        b.ConfirmedAt,
-        b.CancelledAt,
-        b.RebookWindowExpiresAt,
+    /// Static for cases where a fresh URL isn't necessary (concurrency tests, e.g.).
+    private static BookingDto MapStatic(Booking b) => new(
+        b.Id, b.StudentId, b.Status, b.GroupChosen, b.CreatedAt,
+        b.ConfirmedAt, b.CancelledAt, b.RebookWindowExpiresAt,
+        b.Items.OrderBy(i => i.ParentRole).Select(i => new BookingItemDto(
+            i.Id, i.SeatId, BlockLabel(i.Zone?.Code ?? ZoneCode.VIPAF),
+            i.Seat?.RowLabel ?? string.Empty, i.Seat?.SeatNumber ?? 0,
+            i.Seat?.FullLabel ?? string.Empty,
+            i.ParentRole, i.TicketNumber, i.QrCodeImageUrl,
+            i.EmailSent, i.HoldExpiresAt)).ToList());
+
+    /// Instance Map — refreshes the SAS on each QR URL so a client opening the page hours
+    /// after checkout still gets a currently-valid signed URL.
+    private BookingDto Map(Booking b) => new(
+        b.Id, b.StudentId, b.Status, b.GroupChosen, b.CreatedAt,
+        b.ConfirmedAt, b.CancelledAt, b.RebookWindowExpiresAt,
         b.Items.OrderBy(i => i.ParentRole).Select(i => new BookingItemDto(
             i.Id, i.SeatId, BlockLabel(i.Zone?.Code ?? ZoneCode.VIPAF),
             i.Seat?.RowLabel ?? string.Empty, i.Seat?.SeatNumber ?? 0,
             i.Seat?.FullLabel ?? string.Empty,
             i.ParentRole, i.TicketNumber,
-            // Back-compat: bookings created before Storage:PublicBaseUrl was wired up have
-            // `http://azurite:10000/...` saved in the DB. Rewrite on the way out so the
-            // browser <img> can fetch them without forcing the user to rebook.
-            i.QrCodeImageUrl?.Replace("http://azurite:10000", "http://localhost:10000"),
+            i.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(i.QrCodeImageUrl),
             i.EmailSent, i.HoldExpiresAt)).ToList());
 }

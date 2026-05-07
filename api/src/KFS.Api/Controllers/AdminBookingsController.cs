@@ -17,10 +17,12 @@ public class AdminBookingsController : ControllerBase
     private readonly IBookingService _bookings;
     private readonly ISeatMapService _seatMap;
     private readonly IApplicationDbContext _db;
+    private readonly IBlobStorage _blobs;
 
-    public AdminBookingsController(IBookingService bookings, ISeatMapService seatMap, IApplicationDbContext db)
+    public AdminBookingsController(IBookingService bookings, ISeatMapService seatMap,
+        IApplicationDbContext db, IBlobStorage blobs)
     {
-        _bookings = bookings; _seatMap = seatMap; _db = db;
+        _bookings = bookings; _seatMap = seatMap; _db = db; _blobs = blobs;
     }
 
     [HttpGet("bookings")]
@@ -39,7 +41,7 @@ public class AdminBookingsController : ControllerBase
                 Application.Services.BookingService.BlockLabel(i.Zone?.Code ?? ZoneCode.VIPAF),
                 i.Seat?.RowLabel ?? "", i.Seat?.SeatNumber ?? 0, i.Seat?.FullLabel ?? "",
                 i.ParentRole, i.TicketNumber,
-                i.QrCodeImageUrl?.Replace("http://azurite:10000", "http://localhost:10000"),
+                i.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(i.QrCodeImageUrl),
                 i.EmailSent, i.HoldExpiresAt)).ToList())).ToList();
     }
 

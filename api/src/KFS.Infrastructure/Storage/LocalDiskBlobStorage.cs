@@ -24,4 +24,7 @@ public class LocalDiskBlobStorage : IBlobStorage
         await File.WriteAllBytesAsync(full, content, ct);
         return $"{_publicBase}/{safe}";
     }
+
+    /// Local-disk URLs don't expire, so this is just a pass-through.
+    public string RefreshReadUrl(string storedUrlOrPath) => storedUrlOrPath;
 }
