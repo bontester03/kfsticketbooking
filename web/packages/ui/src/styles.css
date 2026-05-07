@@ -100,20 +100,39 @@
   .venue-row-label {
     @apply w-4 text-center text-[10px] font-bold text-kfs-forest;
   }
-  /* No wrapping, no scrollbar — 19 seats sit on a single line. We shrink to fit using
-     `flex-1 basis-0` on the seat element so seats divide whatever width the side has. */
-  .venue-row-seats { @apply flex flex-1 flex-nowrap gap-[2px]; }
+  /* No wrapping, no scrollbar — 19 seats sit on a single line. Slightly bigger row spacing
+     so the ring on a picked seat doesn't bleed into its neighbour. */
+  .venue-row-seats { @apply flex flex-1 flex-nowrap gap-[3px]; }
 
+  /* Every seat is a bordered button. Selection pops via a thicker ring + bg switch + a
+     small scale so the picked seat is unmistakable across the whole hall. */
   .venue-seat {
-    @apply inline-flex h-5 min-w-0 flex-1 basis-0 items-center justify-center rounded
-           text-[10px] font-semibold leading-none transition-colors select-none;
+    @apply inline-flex h-6 min-w-0 flex-1 basis-0 items-center justify-center rounded
+           border text-[10px] font-semibold leading-none select-none
+           transition-[background-color,color,border-color,box-shadow,transform] duration-150;
   }
-  .venue-seat-available { @apply venue-seat bg-white/95 text-kfs-forest hover:bg-kfs-sage-500 hover:text-white cursor-pointer; }
-  .venue-seat-held      { @apply venue-seat bg-kfs-gold-100 text-kfs-gold-700 cursor-not-allowed; }
-  .venue-seat-booked    { @apply venue-seat bg-kfs-forest text-kfs-forest-50 cursor-not-allowed; }
-  .venue-seat-picked    { @apply venue-seat bg-kfs-gold text-white ring-2 ring-kfs-gold-700; }
-  .venue-seat-mirror    { @apply venue-seat bg-kfs-gold/40 text-kfs-forest ring-1 ring-kfs-gold-700; }
-  .venue-seat-yours     { @apply venue-seat bg-emerald-500 text-white ring-2 ring-emerald-700 cursor-default; }
+  .venue-seat-available {
+    @apply venue-seat bg-white text-kfs-forest border-kfs-sage-500
+           hover:bg-kfs-sage-100 hover:border-kfs-forest hover:shadow-sm cursor-pointer;
+  }
+  .venue-seat-held {
+    @apply venue-seat bg-kfs-gold-100 text-kfs-gold-700 border-kfs-gold-700/50 cursor-not-allowed;
+  }
+  .venue-seat-booked {
+    @apply venue-seat bg-kfs-forest text-kfs-forest-50 border-kfs-forest-700 cursor-not-allowed;
+  }
+  .venue-seat-picked {
+    @apply venue-seat bg-kfs-gold text-white border-kfs-gold-700
+           ring-2 ring-kfs-gold-700 ring-offset-1 ring-offset-white scale-110 shadow-md cursor-pointer;
+  }
+  .venue-seat-mirror {
+    @apply venue-seat bg-kfs-gold/30 text-kfs-forest border-kfs-gold-700
+           ring-1 ring-kfs-gold-700 cursor-not-allowed;
+  }
+  .venue-seat-yours {
+    @apply venue-seat bg-emerald-500 text-white border-emerald-700
+           ring-2 ring-emerald-700 ring-offset-1 ring-offset-white cursor-default;
+  }
 
   .venue-right-rail {
     grid-row: 1; grid-column: 2;
