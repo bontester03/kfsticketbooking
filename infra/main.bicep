@@ -33,9 +33,9 @@ param postgresAdminLogin string = 'kfsadmin'
 @description('Postgres administrator password. Pull from Key Vault in CI.')
 param postgresAdminPassword string
 
-@description('App Service plan SKU. B1 for dev, P1V3 for prod.')
-@allowed(['B1', 'P1V3'])
-param appServiceSku string = 'B1'
+@description('App Service plan SKU. F1 (Free, no VM quota) for trial subs, B1 dev, P1V3 prod.')
+@allowed(['F1', 'B1', 'P1V3'])
+param appServiceSku string = 'F1'
 
 @description('Postgres Flex SKU. Burstable for dev, GeneralPurpose for prod.')
 param postgresSku object = {

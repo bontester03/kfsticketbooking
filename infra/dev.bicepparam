@@ -6,9 +6,13 @@ param project = 'kfs'
 param postgresAdminLogin = 'kfsadmin'
 // Pull these from your dev Key Vault or pass via `--parameters postgresAdminPassword=...` on the CLI.
 param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD', '')
-param appServiceSku = 'B1'
+// F1 = Free App Service tier: consumes no VM quota (trial subs have 0 VM quota).
+// Trade-offs: 60 CPU-min/day, no Always-On (cold starts), 1 GB. Fine to validate the
+// deploy; bump to B1 once the client lifts App Service quota for event day.
+param appServiceSku = 'F1'
+// Smallest Burstable Postgres — lowest quota footprint on a trial subscription.
 param postgresSku = {
-  name: 'Standard_B2s'
+  name: 'Standard_B1ms'
   tier: 'Burstable'
 }
 param postgresStorageGB = 32
