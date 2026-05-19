@@ -66,6 +66,10 @@ var tags = {
 }
 var nameSuffix = '${project}-${env}-uaen'
 var storageName = toLower('${project}${env}st${uniqueString(resourceGroup().id)}')
+// Derived deterministically from the (known) storage account name so the App Service module
+// does NOT depend on the storage module's outputs. Without this, appService→storage and
+// storage→appService (it needs the MI principalId for its RBAC grant) form a cycle.
+var storageBlobEndpoint = 'https://${storageName}.blob.${environment().suffixes.storage}/'
 
 // -------- Application Insights -----------------------------------------------------------------
 module appInsights 'modules/app-insights.bicep' = {
@@ -137,7 +141,7 @@ module appService 'modules/app-service.bicep' = {
       Database__RunMigrationsOnStartup: 'true'
       Swagger__Enabled: env == 'prod' ? 'false' : 'true'
       Storage__Provider: 'AzureBlob'
-      Storage__ServiceUri: storage.outputs.blobEndpoint
+      Storage__ServiceUri: storageBlobEndpoint
       Storage__Container: 'qr-codes'
       Storage__SasLifetimeMinutes: '5'
       'ConnectionStrings__Default': '@Microsoft.KeyVault(VaultName=kv-${nameSuffix};SecretName=PostgresConnectionString)'

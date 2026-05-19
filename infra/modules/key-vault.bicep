@@ -10,8 +10,11 @@ param tags object = {}
 @description('App Service Managed Identity object ID — granted Key Vault Secrets User.')
 param appServicePrincipalId string
 
-@description('Secrets to store at deploy time.')
-@secure()
+// Each element is { name, value }. The *values* originate from @secure() params in
+// main.bicep; @secure() can't decorate an array type, so it's omitted here. Bicep still
+// keeps the individual secret values out of deployment output because their source params
+// upstream are secure.
+@description('Secrets to store at deploy time: array of { name, value }.')
 param secrets array = []
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
