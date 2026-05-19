@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target environment'
+        description: 'Target environment (dev = ~$50/mo B1+Burstable, fits the $200 credit)'
         required: true
-        default: 'prod'
+        default: 'dev'
         type: choice
         options: [dev, prod]
   push:
@@ -40,7 +40,7 @@ jobs:
   deploy-infra:
     name: Bicep deploy
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'prod' }}
+    environment: ${{ inputs.environment || 'dev' }}
     outputs:
       apiUrl: ${{ steps.deploy.outputs.apiUrl }}
     steps:
@@ -63,7 +63,7 @@ jobs:
           az deployment group what-if \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
-            --parameters infra/${{ inputs.environment || 'prod' }}.bicepparam
+            --parameters infra/${{ inputs.environment || 'dev' }}.bicepparam
 
       - name: Apply
         id: deploy
@@ -76,7 +76,7 @@ jobs:
           OUT=$(az deployment group create \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
-            --parameters infra/${{ inputs.environment || 'prod' }}.bicepparam \
+            --parameters infra/${{ inputs.environment || 'dev' }}.bicepparam \
             --query properties.outputs --output json)
           echo "apiUrl=$(echo "$OUT" | jq -r '.apiUrl.value')" >> $GITHUB_OUTPUT
 
@@ -84,7 +84,7 @@ jobs:
     name: API publish + deploy
     needs: deploy-infra
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'prod' }}
+    environment: ${{ inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
 
