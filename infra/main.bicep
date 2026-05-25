@@ -18,8 +18,11 @@ targetScope = 'resourceGroup'
 @allowed(['dev', 'prod'])
 param env string
 
-@description('Azure region. UAE North for data residency.')
+@description('Data region — Postgres, Storage, Key Vault, telemetry. UAE North for Saudi PDPL data residency.')
 param location string = 'uaenorth'
+
+@description('Compute region — App Service. Split from data because UAE North has 0 App Service quota; the stateless API runs here while all PII stays at rest in `location`.')
+param computeLocation string = 'uksouth'
 
 @description('Project short slug. Keep ≤6 chars; rolled into globally-unique names.')
 @minLength(3)
@@ -132,7 +135,7 @@ module appService 'modules/app-service.bicep' = {
   params: {
     name: 'app-${nameSuffix}'
     planName: 'asp-${nameSuffix}'
-    location: location
+    location: computeLocation
     tags: tags
     sku: appServiceSku
     appSettings: {

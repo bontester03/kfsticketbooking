@@ -1,11 +1,11 @@
 using './main.bicep'
 
 param env = 'dev'
-// TEMPORARY: UAE North has 0 App Service quota on this subscription (request pending).
-// West Europe has generous default quota, so we deploy here to validate the pipeline.
-// ⚠️ Data-residency deviation — switch back to 'uaenorth' for production once quota is granted.
-// (Resource names keep the 'uaen' suffix; that's just a label and matches AZURE_APP_NAME.)
-param location = 'westeurope'
+// Data (Postgres, Storage, Key Vault, telemetry) stays in UAE North for Saudi PDPL residency.
+param location = 'uaenorth'
+// Compute (App Service) runs in UK South because UAE North has 0 App Service quota.
+// Stateless API only; no PII at rest here. Move back to uaenorth once its quota is granted.
+param computeLocation = 'uksouth'
 param project = 'kfs'
 param postgresAdminLogin = 'kfsadmin'
 // Pull these from your dev Key Vault or pass via `--parameters postgresAdminPassword=...` on the CLI.
