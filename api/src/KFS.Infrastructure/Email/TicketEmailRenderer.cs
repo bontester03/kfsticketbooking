@@ -39,7 +39,7 @@ public class TicketEmailRenderer : ITicketEmailRenderer
                         <img alt="QR" src="data:image/png;base64,{{qrB64}}" style="width:220px;height:220px;border:1px solid #e2e8f0;border-radius:8px" />
                     </div>
                     {{(m.MapLink is null ? "" : $"<p style='margin-top:14px'><a href='{m.MapLink}' style='color:#1e40af'>Open venue map</a></p>")}}
-                    <p style="margin-top:18px;color:#64748b;font-size:12px">Ticket sent to {{m.StudentEmail}} and pending approval by receiver.</p>
+                    <p style="margin-top:18px;color:#64748b;font-size:12px">Ticket sent to {{m.StudentEmail}}.</p>
                 </td></tr>
             </table>
         </body>

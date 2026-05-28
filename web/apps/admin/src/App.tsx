@@ -1,30 +1,44 @@
-import { Card, EmptyState, KfsLogo } from '@kfs/ui';
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { LoadingPanel } from '@kfs/ui';
+import { RequireAuth } from './components/RequireAuth';
+import { Layout } from './components/Layout';
+
+const LoginPage          = lazy(() => import('./pages/LoginPage'));
+const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'));
+const DashboardPage      = lazy(() => import('./pages/DashboardPage'));
+const StudentsPage       = lazy(() => import('./pages/StudentsPage'));
+const PassesPage         = lazy(() => import('./pages/PassesPage'));
+const GuestPage          = lazy(() => import('./pages/GuestPage'));
+const ScansPage          = lazy(() => import('./pages/ScansPage'));
+const SeatMapPage        = lazy(() => import('./pages/SeatMapPage'));
+const ReportsPage        = lazy(() => import('./pages/ReportsPage'));
+const RemindersPage      = lazy(() => import('./pages/RemindersPage'));
+const EventSettingsPage  = lazy(() => import('./pages/EventSettingsPage'));
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-kfs-forest-50/40">
-      <header className="border-b border-kfs-sage-100 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <KfsLogo />
-          <span className="text-sm font-semibold uppercase tracking-wider text-kfs-sage-700">Admin Console</span>
-        </div>
-      </header>
+    <Suspense fallback={<LoadingPanel />}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/change-password" element={
+          <RequireAuth><ChangePasswordPage /></RequireAuth>
+        } />
 
-      <main className="mx-auto max-w-6xl px-4 py-10">
-        <Card className="mb-6">
-          <h1 className="text-xl font-semibold text-kfs-forest">KFS Admin Console</h1>
-          <p className="mt-2 text-sm text-kfs-sage-700">
-            The full admin experience (students, Excel upload, live seat map, generate passes,
-            reports, reminders, event settings) is part of the next pass — see DECISIONS.md.
-            For now use Swagger at <code className="rounded bg-kfs-sage-50 px-1.5 py-0.5 font-mono text-xs">http://localhost:5080/swagger</code>
-            with the seeded super-admin (<code>admin@kfs.sch.sa</code>).
-          </p>
-        </Card>
-        <EmptyState
-          title="Admin pages coming soon"
-          description="The shell exists; pages will land in the next frontend pass."
-        />
-      </main>
-    </div>
+        <Route element={<RequireAuth><Layout /></RequireAuth>}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/students" element={<StudentsPage />} />
+          <Route path="/passes" element={<PassesPage />} />
+          <Route path="/guest" element={<GuestPage />} />
+          <Route path="/scans" element={<ScansPage />} />
+          <Route path="/seatmap" element={<SeatMapPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reminders" element={<RemindersPage />} />
+          <Route path="/event" element={<EventSettingsPage />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

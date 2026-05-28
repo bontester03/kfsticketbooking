@@ -17,12 +17,34 @@ public class StudentSelfController : ControllerBase
     private readonly IBookingService _bookings;
     private readonly ISeatMapService _seatMap;
     private readonly IEventService _events;
+    private readonly IGuestPassService _guest;
+    private readonly IStudentTicketBundleService _bundle;
     private readonly ICurrentUser _currentUser;
 
     public StudentSelfController(IBookingService bookings, ISeatMapService seatMap,
-        IEventService events, ICurrentUser currentUser)
+        IEventService events, IGuestPassService guest, IStudentTicketBundleService bundle, ICurrentUser currentUser)
     {
-        _bookings = bookings; _seatMap = seatMap; _events = events; _currentUser = currentUser;
+        _bookings = bookings; _seatMap = seatMap; _events = events; _guest = guest; _bundle = bundle; _currentUser = currentUser;
+    }
+
+    private Guid StudentId => _currentUser.UserId ?? throw new KFS.Application.Common.Exceptions.AppException("unauthorized", "Not signed in.", 401);
+
+    // The child's own Guest ticket (1 QR, admits 3) — null if not booked yet.
+    [HttpGet("guest")]
+    public Task<KFS.Application.DTOs.Passes.GuestPassDto?> MyGuestPass(CancellationToken ct)
+        => _guest.GetForStudentAsync(StudentId, ct);
+
+    // Book the one Guest ticket for the signed-in child.
+    [HttpPost("guest")]
+    public Task<KFS.Application.DTOs.Passes.GuestPassDto> BookGuestPass(CancellationToken ct)
+        => _guest.BookForStudentAsync(StudentId, issuedByAdminId: null, issuedToName: null, ct);
+
+    // Combined PDF: every parent pass + the guest ticket (if any) for the signed-in child.
+    [HttpGet("me/tickets.pdf")]
+    public async Task<IActionResult> TicketsBundle(CancellationToken ct)
+    {
+        var (bytes, fileName) = await _bundle.BuildAsync(StudentId, ct);
+        return File(bytes, "application/pdf", fileName);
     }
 
     [HttpGet("me")]

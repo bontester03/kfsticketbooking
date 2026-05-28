@@ -25,11 +25,12 @@ export function Layout() {
       <header className="border-b border-kfs-sage-100 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
-            <KfsLogo />
+            <KfsLogo href="/" />
           </div>
           <nav className="hidden gap-1 sm:flex">
             <NavLink to="/" end className={({ isActive }) => navCls(isActive)}>{t('nav.dashboard')}</NavLink>
             <NavLink to="/bookings" className={({ isActive }) => navCls(isActive)}>{t('nav.myBookings')}</NavLink>
+            <NavLink to="/guest" className={({ isActive }) => navCls(isActive)}>Guest ticket</NavLink>
           </nav>
           <div className="flex items-center gap-2">
             <span className="hidden text-sm text-kfs-sage-700 sm:inline">{displayName}</span>

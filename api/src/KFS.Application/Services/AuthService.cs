@@ -32,7 +32,8 @@ public class AuthService : IAuthService
             throw new UnauthorizedException("Invalid credentials.");
 
         return await IssueAndPersistAsync(student.Id, UserType.Student, student.Email,
-            $"{student.FirstName} {student.LastName}", new[] { "Student" }, student.MustChangePassword, ct);
+            $"{student.FirstName} {student.LastName}", new[] { "Student" }, student.MustChangePassword, ct,
+            assignedGroup: student.AssignedGroup.HasValue ? (int?)student.AssignedGroup.Value : null);
     }
 
     public async Task<AuthResponse> AdminLoginAsync(LoginRequest request, CancellationToken ct = default)
@@ -61,12 +62,13 @@ public class AuthService : IAuthService
         // Rotate: revoke the old one, issue a new one chained via ReplacedByTokenId.
         stored.RevokedAt = DateTime.UtcNow;
 
-        string email; string name; string[] roles; bool mustChange;
+        string email; string name; string[] roles; bool mustChange; int? assignedGroup = null;
         if (stored.UserType == UserType.Student)
         {
             var s = await _db.Students.FindAsync(new object[] { stored.UserId }, ct)
                 ?? throw new UnauthorizedException();
             email = s.Email; name = $"{s.FirstName} {s.LastName}"; roles = new[] { "Student" }; mustChange = s.MustChangePassword;
+            assignedGroup = s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null;
         }
         else
         {
@@ -75,7 +77,7 @@ public class AuthService : IAuthService
             email = a.Email; name = a.FullName; roles = new[] { "Admin" }; mustChange = a.MustChangePassword;
         }
 
-        var resp = await IssueAndPersistAsync(stored.UserId, stored.UserType, email, name, roles, mustChange, ct, replacedById: stored.Id);
+        var resp = await IssueAndPersistAsync(stored.UserId, stored.UserType, email, name, roles, mustChange, ct, replacedById: stored.Id, assignedGroup: assignedGroup);
         await _db.SaveChangesAsync(ct);
         return resp;
     }
@@ -141,7 +143,7 @@ public class AuthService : IAuthService
 
     private async Task<AuthResponse> IssueAndPersistAsync(
         Guid userId, UserType userType, string email, string displayName, IEnumerable<string> roles,
-        bool mustChange, CancellationToken ct, Guid? replacedById = null)
+        bool mustChange, CancellationToken ct, Guid? replacedById = null, int? assignedGroup = null)
     {
         var pair = _jwt.Issue(userId, userType, email, roles);
         _db.RefreshTokens.Add(new RefreshToken
@@ -153,7 +155,7 @@ public class AuthService : IAuthService
         });
         await _db.SaveChangesAsync(ct);
         return new AuthResponse(pair.AccessToken, pair.AccessExpiresAt, pair.RefreshToken, pair.RefreshExpiresAt,
-            userId, userType, email, displayName, mustChange);
+            userId, userType, email, displayName, mustChange, assignedGroup);
     }
 
     private static string Normalize(string email) => email.Trim().ToLowerInvariant();

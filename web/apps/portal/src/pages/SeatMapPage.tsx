@@ -149,7 +149,11 @@ export default function SeatMapPage() {
               </p>
               <p className="mt-1 text-xs text-kfs-sage-700">{t('rebook.readOnlyHint')}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="accent" onClick={() => api.bookings.downloadAllPdf()
+                .catch((e: { message?: string }) => toast.error(e?.message ?? 'Download failed.'))}>
+                Download tickets PDF
+              </Button>
               <Button variant="secondary" onClick={() => navigate('/bookings')}>{t('myBookings.title')}</Button>
               <Button
                 variant="danger"

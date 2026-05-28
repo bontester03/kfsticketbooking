@@ -15,7 +15,12 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
         b.HasIndex(x => x.Email).IsUnique();
         b.Property(x => x.FirstName).HasMaxLength(120).IsRequired();
         b.Property(x => x.LastName).HasMaxLength(120).IsRequired();
+        b.Property(x => x.StudentNumber).HasMaxLength(60);
+        b.HasIndex(x => x.StudentNumber).IsUnique().HasFilter("student_number IS NOT NULL");
+        b.Property(x => x.PreferredName).HasMaxLength(180);
+        b.Property(x => x.Gender).HasMaxLength(20);
         b.Property(x => x.GradeOrClass).HasMaxLength(60);
+        b.Property(x => x.AssignedGroup).HasConversion<int?>();
         b.Property(x => x.PasswordHash).IsRequired();
         b.Property(x => x.DateOfBirth).HasColumnType("date");
     }
@@ -132,8 +137,13 @@ public class AdminPassConfiguration : IEntityTypeConfiguration<AdminPass>
         b.HasOne(x => x.Event).WithMany(e => e.AdminPasses).HasForeignKey(x => x.EventId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        b.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.HasIndex(x => new { x.BatchId, x.SequenceNumber }).IsUnique();
         b.HasIndex(x => x.QrCodePayload).IsUnique();
+        // At most one pass per (child, type) — enforces "one guest ticket per child".
+        b.HasIndex(x => new { x.StudentId, x.Type }).IsUnique().HasFilter("student_id IS NOT NULL");
     }
 }
 

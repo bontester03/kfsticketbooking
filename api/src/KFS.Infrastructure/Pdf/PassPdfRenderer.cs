@@ -1,5 +1,6 @@
 using KFS.Application.Interfaces;
 using KFS.Domain.Enums;
+using QuestPDF.Drawing;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -8,8 +9,51 @@ namespace KFS.Infrastructure.Pdf;
 
 public class PassPdfRenderer : IPassPdfRenderer
 {
+    private const string FontFamily = "Dubai";
+    private static readonly bool ArabicFontReady = RegisterFonts();
+
+    // Register the bundled Dubai font (Arabic + Latin) once. QuestPDF's default font (Lato) has
+    // no Arabic glyphs, which is why the zone line printed as tofu boxes before.
+    private static bool RegisterFonts()
+    {
+        try
+        {
+            var dir = Path.Combine(AppContext.BaseDirectory, "Pdf", "Fonts");
+            var ok = false;
+            foreach (var file in new[] { "Dubai-Regular.ttf", "Dubai-Bold.ttf" })
+            {
+                var path = Path.Combine(dir, file);
+                if (!File.Exists(path)) continue;
+                using var s = File.OpenRead(path);
+                FontManager.RegisterFont(s);
+                ok = true;
+            }
+            return ok;
+        }
+        catch { return false; }
+    }
+
+    // Per-type theme: accent colour, short badge letter, gate label, zone name (EN + AR).
+    private record PassTheme(string Label, string Letter, string Gate, string Zone, string Accent, string Arabic);
+
+    private static PassTheme Theme(AdminPassType type) => type switch
+    {
+        AdminPassType.VVIP  => new("VVIP",  "V", "Gate V", "VVIP",  "#a08b16", "كبار الشخصيات"),
+        AdminPassType.Guest => new("Guest", "G", "Gate G", "Guest", "#8b5cf6", "ضيف"),
+        AdminPassType.Staff => new("Staff", "S", "Gate S", "Staff", "#0d3128", "طاقم العمل"),
+        AdminPassType.Media => new("Media", "M", "Gate M", "Media", "#0ea5e9", "إعلام"),
+        _ => new("Pass", "P", "Gate", "General", "#475569", "تصريح")
+    };
+
+    // Match the web PassTicketCard proportions: ~1.7:1 wide card, centred on the page.
+    private const float CardWidth = 440f;
+    private const float CardMinHeight = 250f;
+
     public byte[] RenderSheet(AdminPassType type, string eventName, DateTime eventDate, IReadOnlyList<PassPdfEntry> entries)
     {
+        var theme = Theme(type);
+        var family = ArabicFontReady ? FontFamily : Fonts.Lato;
+
         var doc = Document.Create(container =>
         {
             container.Page(page =>
@@ -17,36 +61,28 @@ public class PassPdfRenderer : IPassPdfRenderer
                 page.Size(PageSizes.A4);
                 page.Margin(20);
                 page.PageColor(Colors.White);
-                page.DefaultTextStyle(t => t.FontSize(10));
+                page.DefaultTextStyle(t => t.FontSize(10).FontColor("#1e293b").FontFamily(family));
 
-                page.Header().Text(t =>
+                page.Header().PaddingBottom(8).Row(h =>
                 {
-                    t.Span($"{type} pass batch — ").Bold();
-                    t.Span($"{eventName} ({eventDate:dd MMM yyyy})");
+                    h.RelativeItem().Column(c =>
+                    {
+                        c.Item().Text($"{theme.Label} passes").FontSize(14).Bold().FontColor(theme.Accent);
+                        c.Item().Text($"{eventName} · {eventDate:dd MMM yyyy}").FontSize(9).FontColor("#64748b");
+                    });
+                    h.AutoItem().AlignRight().Text("King Faisal School").FontSize(10).Bold().FontColor("#0d3128");
                 });
 
                 page.Content().Column(col =>
                 {
-                    var perRow = 3;
-                    for (var i = 0; i < entries.Count; i += perRow)
+                    foreach (var entry in entries)
                     {
-                        col.Item().Row(row =>
+                        // Centre each fixed-width card with flexible spacers either side.
+                        col.Item().PaddingBottom(12).Row(r =>
                         {
-                            for (var j = 0; j < perRow; j++)
-                            {
-                                if (i + j >= entries.Count) { row.RelativeItem(); continue; }
-                                var entry = entries[i + j];
-                                row.RelativeItem().PaddingBottom(15).Border(1).BorderColor(Colors.Grey.Lighten2)
-                                    .Padding(8).Column(cell =>
-                                {
-                                    cell.Item().AlignCenter().Image(entry.QrPng).WithCompressionQuality(ImageCompressionQuality.High);
-                                    cell.Item().PaddingTop(6).AlignCenter().Text(entry.TicketNumber).FontSize(9);
-                                    if (entry.SeatsCount > 1)
-                                        cell.Item().AlignCenter().Text($"Group of {entry.SeatsCount}").FontSize(8).Italic();
-                                    if (!string.IsNullOrWhiteSpace(entry.IssuedToName))
-                                        cell.Item().AlignCenter().Text(entry.IssuedToName!).FontSize(9);
-                                });
-                            }
+                            r.RelativeItem();
+                            r.ConstantItem(CardWidth).Element(c => RenderCard(c, theme, entry));
+                            r.RelativeItem();
                         });
                     }
                 });
@@ -60,5 +96,205 @@ public class PassPdfRenderer : IPassPdfRenderer
         });
 
         return doc.GeneratePdf();
+    }
+
+    private static void RenderCard(IContainer container, PassTheme theme, PassPdfEntry entry)
+    {
+        var isGuest = entry.SeatsCount > 1;
+
+        // Single-admit passes (VVIP / Staff / Media): just the QR, centred. No stub, no frame.
+        // The page header already carries the event/type context; the ticket number sits small
+        // beneath the QR as a fallback ID if the scan ever fails.
+        if (!isGuest)
+        {
+            container.PaddingVertical(8).Column(c =>
+            {
+                c.Item().AlignCenter().Width(240).Height(240)
+                    .Image(entry.QrPng).WithCompressionQuality(ImageCompressionQuality.High);
+                c.Item().PaddingTop(8).AlignCenter().Text(entry.TicketNumber)
+                    .FontSize(9).FontColor("#94a3b8");
+            });
+            return;
+        }
+
+        var last6 = (entry.TicketNumber ?? "").Length >= 6
+            ? entry.TicketNumber!.Substring(entry.TicketNumber.Length - 6)
+            : (entry.TicketNumber ?? "").PadLeft(6, '*');
+
+        container.MinHeight(CardMinHeight).Border(1).BorderColor("#e2e8f0").Background(Colors.White)
+            .Padding(14).Row(row =>
+        {
+            // ---- Left stub (1.7 share): ticket no, category badge, info grid, Arabic zone ----
+            row.RelativeItem(1.7f).PaddingRight(10).Column(stub =>
+            {
+                stub.Item().Text($"#****{last6}").FontSize(10).LetterSpacing(0.05f).FontColor("#475569");
+                stub.Item().PaddingTop(4).LineHorizontal(0.5f).LineColor("#e2e8f0");
+
+                stub.Item().PaddingTop(8).Text("CATEGORY").FontSize(7).Bold().FontColor("#64748b");
+                stub.Item().PaddingTop(3).Width(46).Height(40).Background(theme.Accent)
+                    .AlignCenter().AlignMiddle().Text(theme.Letter).FontSize(20).Bold().FontColor("#ffffff");
+
+                stub.Item().PaddingTop(12).Row(g =>
+                {
+                    Field(g, "GATE", entry.Gate ?? theme.Gate);
+                    Field(g, "ZONE", theme.Zone);
+                    Field(g, "SEATS", entry.SeatsCount.ToString());
+                    Field(g, "PASS #", entry.SequenceNumber.ToString("D3"));
+                });
+
+                stub.Item().PaddingTop(12).LineHorizontal(0.5f).LineColor("#e2e8f0");
+                stub.Item().PaddingTop(6).Text(entry.TicketNumber).FontSize(8).FontColor("#94a3b8");
+                stub.Item().PaddingTop(2).AlignRight().Text($"المنطقة: {theme.Arabic}")
+                    .FontSize(11).FontColor("#475569");
+                stub.Item().PaddingTop(2).Text(
+                    string.IsNullOrWhiteSpace(entry.IssuedToName) ? "General admission" : $"Issued to {entry.IssuedToName}")
+                    .FontSize(9).Italic().FontColor("#94a3b8");
+            });
+
+            // ---- Right receipt (1 share): QR (single-admit passes), or QR + headline (Guest). ----
+            row.RelativeItem(1f).BorderLeft(1).BorderColor("#cbd5e1").PaddingLeft(12)
+               .Column(rec =>
+            {
+                var isGuest = entry.SeatsCount > 1;
+                if (isGuest)
+                {
+                    rec.Item().AlignCenter().Text("Present this pass").FontSize(9).FontColor("#475569");
+                    rec.Item().AlignCenter().Text("at the gate").FontSize(9).Bold().FontColor("#0f172a");
+                    rec.Item().PaddingTop(2).AlignCenter().Text($"{theme.Label} zone").FontSize(8).FontColor("#64748b");
+                    rec.Item().PaddingTop(8).AlignCenter().Text("QR Code:").FontSize(9).FontColor("#475569");
+                }
+                rec.Item().PaddingTop(isGuest ? 4 : 0).AlignCenter().AlignMiddle().Width(130).Height(130)
+                    .Image(entry.QrPng).WithCompressionQuality(ImageCompressionQuality.High);
+            });
+        });
+    }
+
+    private static void Field(RowDescriptor row, string label, string value)
+    {
+        row.RelativeItem().Column(c =>
+        {
+            c.Item().Text(label).FontSize(6.5f).Bold().FontColor("#64748b");
+            c.Item().Text(value).FontSize(11).Bold().FontColor("#0f172a");
+        });
+    }
+
+    // ---------- Student tickets bundle PDF ----------
+
+    // Student parent passes use the violet category badge (matches the web TicketCard).
+    // Group changes the letter and the gate; the badge colour is the same on A and B.
+    private static (string Letter, string Gate, string Accent) SeatTheme(string group) =>
+        string.Equals(group, "B", StringComparison.OrdinalIgnoreCase)
+            ? ("B", "Gate B", "#8b5cf6")
+            : ("A", "Gate A", "#8b5cf6");
+
+    public byte[] RenderStudentTickets(string eventName, DateTime eventDate, string studentName,
+        IReadOnlyList<StudentSeatTicketEntry> seats, PassPdfEntry? guest)
+    {
+        var family = ArabicFontReady ? FontFamily : Fonts.Lato;
+
+        var doc = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(20);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(t => t.FontSize(10).FontColor("#1e293b").FontFamily(family));
+
+                page.Header().PaddingBottom(8).Row(h =>
+                {
+                    h.RelativeItem().Column(c =>
+                    {
+                        c.Item().Text("Your tickets").FontSize(14).Bold().FontColor("#0d3128");
+                        c.Item().Text($"{eventName} · {eventDate:dd MMM yyyy} · {studentName}")
+                            .FontSize(9).FontColor("#64748b");
+                    });
+                    h.AutoItem().AlignRight().Text("King Faisal School").FontSize(10).Bold().FontColor("#0d3128");
+                });
+
+                page.Content().Column(col =>
+                {
+                    foreach (var s in seats)
+                    {
+                        col.Item().PaddingBottom(12).Row(r =>
+                        {
+                            r.RelativeItem();
+                            r.ConstantItem(CardWidth).Element(c => RenderSeatCard(c, s));
+                            r.RelativeItem();
+                        });
+                    }
+                    if (guest is not null)
+                    {
+                        var theme = Theme(Domain.Enums.AdminPassType.Guest);
+                        col.Item().PaddingBottom(12).Row(r =>
+                        {
+                            r.RelativeItem();
+                            r.ConstantItem(CardWidth).Element(c => RenderCard(c, theme, guest));
+                            r.RelativeItem();
+                        });
+                    }
+                });
+
+                page.Footer().AlignCenter().Text(t =>
+                {
+                    t.Span("Generated by KFS Booking · ").FontSize(8).FontColor(Colors.Grey.Medium);
+                    t.Span($"{DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC").FontSize(8).FontColor(Colors.Grey.Medium);
+                });
+            });
+        });
+
+        return doc.GeneratePdf();
+    }
+
+    private static void RenderSeatCard(IContainer container, StudentSeatTicketEntry s)
+    {
+        var theme = SeatTheme(s.Group);
+        var last6 = (s.TicketNumber ?? "").Length >= 6
+            ? s.TicketNumber!.Substring(s.TicketNumber.Length - 6)
+            : (s.TicketNumber ?? "").PadLeft(6, '*');
+
+        container.MinHeight(CardMinHeight).Border(1).BorderColor("#e2e8f0").Background(Colors.White)
+            .Padding(14).Row(row =>
+        {
+            // ---- Left stub: ticket no, violet CATEGORY badge, GATE/BLOCK/SEAT/ROW grid, Arabic pair ----
+            row.RelativeItem(1.7f).PaddingRight(10).Column(stub =>
+            {
+                stub.Item().Text($"#****{last6}").FontSize(10).LetterSpacing(0.05f).FontColor("#475569");
+                stub.Item().PaddingTop(4).LineHorizontal(0.5f).LineColor("#e2e8f0");
+
+                stub.Item().PaddingTop(8).Text("CATEGORY").FontSize(7).Bold().FontColor("#64748b");
+                stub.Item().PaddingTop(3).Width(46).Height(40).Background(theme.Accent)
+                    .AlignCenter().AlignMiddle().Text(theme.Letter).FontSize(20).Bold().FontColor("#ffffff");
+
+                stub.Item().PaddingTop(12).Row(g =>
+                {
+                    Field(g, "GATE", theme.Gate);
+                    Field(g, "BLOCK", $"VIP {theme.Letter}");
+                    Field(g, "SEAT", s.Seat.ToString());
+                    Field(g, "ROW", s.Row);
+                });
+
+                stub.Item().PaddingTop(12).LineHorizontal(0.5f).LineColor("#e2e8f0");
+                stub.Item().PaddingTop(6).AlignRight().Text($"المقاعد المحجوزة: {s.PairLabel}")
+                    .FontSize(12).FontColor("#475569");
+                stub.Item().PaddingTop(4).Text($"{s.ParentRole} of {s.StudentName}")
+                    .FontSize(9).Italic().FontColor("#94a3b8");
+                stub.Item().PaddingTop(2).Text(s.TicketNumber).FontSize(8).FontColor("#94a3b8");
+            });
+
+            // ---- Right receipt: "Ticket is sent to <email>" + QR ----
+            row.RelativeItem(1f).BorderLeft(1).BorderColor("#cbd5e1").PaddingLeft(12)
+               .Column(rec =>
+            {
+                // Simple "clock" mark drawn as a small gold square (Dubai font has no clock glyph).
+                rec.Item().AlignCenter().PaddingBottom(4).Width(18).Height(18)
+                    .Background("#a08b16").Border(2).BorderColor("#a08b16");
+                rec.Item().AlignCenter().Text("Ticket is sent to").FontSize(9).FontColor("#475569");
+                rec.Item().AlignCenter().Text(s.StudentEmail).FontSize(9).Bold().FontColor("#0f172a");
+                rec.Item().PaddingTop(8).AlignCenter().Text("QR Code:").FontSize(9).FontColor("#475569");
+                rec.Item().PaddingTop(4).AlignCenter().Width(120).Height(120)
+                    .Image(s.QrPng).WithCompressionQuality(ImageCompressionQuality.High);
+            });
+        });
     }
 }

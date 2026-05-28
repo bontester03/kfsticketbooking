@@ -38,9 +38,12 @@ public class QrCodeService : IQrCodeService
 
     public QrPayloadDecoded DecodePayload(string token)
     {
-        var handler = new JwtSecurityTokenHandler();
+        // Read claims off the validated token directly. The ClaimsPrincipal that ValidateToken
+        // produces remaps inbound claim types, so the short names ("tid", "eid", …) we wrote
+        // wouldn't be found via principal.FindFirstValue — jwt.Claims preserves them verbatim.
+        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.SigningKey));
-        var principal = handler.ValidateToken(token, new TokenValidationParameters
+        handler.ValidateToken(token, new TokenValidationParameters
         {
             ValidateIssuer = true, ValidateAudience = true, ValidateLifetime = true, ValidateIssuerSigningKey = true,
             ValidIssuer = _settings.Issuer, ValidAudience = _settings.Issuer,
@@ -48,13 +51,14 @@ public class QrCodeService : IQrCodeService
         }, out var validated);
         var jwt = (JwtSecurityToken)validated;
 
-        Guid Get(string n) => Guid.Parse(principal.FindFirstValue(n)
+        string? Claim(string n) => jwt.Claims.FirstOrDefault(c => c.Type == n)?.Value;
+        Guid Get(string n) => Guid.Parse(Claim(n)
             ?? throw new AppException("invalid_qr", $"Missing claim {n}", 400));
 
-        var typ = principal.FindFirstValue("typ");
-        var zn = int.Parse(principal.FindFirstValue("zn") ?? "0");
-        var sc = int.Parse(principal.FindFirstValue("sc") ?? "1");
-        var sl = principal.FindFirstValue("sl");
+        var typ = Claim("typ");
+        var zn = int.Parse(Claim("zn") ?? "0");
+        var sc = int.Parse(Claim("sc") ?? "1");
+        var sl = Claim("sl");
 
         return new QrPayloadDecoded(Get("tid"), Get("eid"),
             typ == "bk" ? ScannedItemType.BookingItem : ScannedItemType.AdminPass,

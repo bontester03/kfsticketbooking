@@ -35,4 +35,26 @@ public class AdminPassesController : ControllerBase
         var (bytes, contentType, fileName) = await _service.DownloadBatchAsync(batchId, format, ct);
         return File(bytes, contentType, fileName);
     }
+
+    [HttpDelete("batches/{batchId:guid}")]
+    public async Task<IActionResult> DeleteBatch(Guid batchId, CancellationToken ct)
+    {
+        var deleted = await _service.DeleteBatchAsync(batchId, ct);
+        return Ok(new { batchId, deleted });
+    }
+
+    // Wipes every pass (optionally just one type). Filtered by ?type=VVIP|Guest|Staff|Media; omit for all.
+    [HttpDelete("batches")]
+    public async Task<IActionResult> DeleteAll([FromQuery] KFS.Domain.Enums.AdminPassType? type, CancellationToken ct)
+    {
+        var deleted = await _service.DeleteAllAsync(type, ct);
+        return Ok(new { type, deleted });
+    }
+
+    [HttpGet("quota")]
+    public Task<IReadOnlyList<PassQuotaDto>> Quota(CancellationToken ct) => _service.GetQuotasAsync(ct);
+
+    [HttpPut("quota")]
+    public Task<PassQuotaDto> SetQuota([FromBody] SetPassQuotaRequest request, CancellationToken ct)
+        => _service.SetQuotaAsync(request, ct);
 }

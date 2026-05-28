@@ -46,8 +46,13 @@ public static class DependencyInjection
         else
             services.AddSingleton<IBlobStorage, LocalDiskBlobStorage>();
 
-        // Email — Console renderer by default; SendGrid/ACS swap-in lives in API layer.
-        services.AddScoped<IEmailService, ConsoleEmailService>();
+        // Email — Console (write to disk) by default; Smtp (Microsoft 365) when configured.
+        services.Configure<EmailSettings>(config.GetSection(EmailSettings.SectionName));
+        var emailProvider = config.GetValue<string>("Email:Provider") ?? "Console";
+        if (string.Equals(emailProvider, "Smtp", StringComparison.OrdinalIgnoreCase))
+            services.AddScoped<IEmailService, SmtpEmailService>();
+        else
+            services.AddScoped<IEmailService, ConsoleEmailService>();
 
         var jwtSection = config.GetSection(JwtSettings.SectionName);
         var secret = jwtSection.GetValue<string>("Secret")

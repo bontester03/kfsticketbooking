@@ -126,6 +126,10 @@ namespace KFS.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("sequence_number");
 
+                    b.Property<Guid?>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
                     b.Property<string>("TicketNumber")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -149,6 +153,11 @@ namespace KFS.Infrastructure.Migrations
                     b.HasIndex("BatchId", "SequenceNumber")
                         .IsUnique()
                         .HasDatabaseName("ix_admin_passes_batch_id_sequence_number");
+
+                    b.HasIndex("StudentId", "Type")
+                        .IsUnique()
+                        .HasDatabaseName("ix_admin_passes_student_id_type")
+                        .HasFilter("student_id IS NOT NULL");
 
                     b.ToTable("admin_passes", (string)null);
                 });
@@ -648,11 +657,15 @@ namespace KFS.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<int?>("AssignedGroup")
+                        .HasColumnType("integer")
+                        .HasColumnName("assigned_group");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTime>("DateOfBirth")
+                    b.Property<DateTime?>("DateOfBirth")
                         .HasColumnType("date")
                         .HasColumnName("date_of_birth");
 
@@ -667,6 +680,11 @@ namespace KFS.Infrastructure.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)")
                         .HasColumnName("first_name");
+
+                    b.Property<string>("Gender")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("gender");
 
                     b.Property<string>("GradeOrClass")
                         .HasMaxLength(60)
@@ -692,12 +710,27 @@ namespace KFS.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("password_hash");
 
+                    b.Property<string>("PreferredName")
+                        .HasMaxLength(180)
+                        .HasColumnType("character varying(180)")
+                        .HasColumnName("preferred_name");
+
+                    b.Property<string>("StudentNumber")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("student_number");
+
                     b.HasKey("Id")
                         .HasName("pk_students");
 
                     b.HasIndex("Email")
                         .IsUnique()
                         .HasDatabaseName("ix_students_email");
+
+                    b.HasIndex("StudentNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_students_student_number")
+                        .HasFilter("student_number IS NOT NULL");
 
                     b.ToTable("students", (string)null);
                 });
@@ -762,7 +795,15 @@ namespace KFS.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_admin_passes_events_event_id");
 
+                    b.HasOne("KFS.Domain.Entities.Student", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_admin_passes_students_student_id");
+
                     b.Navigation("Event");
+
+                    b.Navigation("Student");
                 });
 
             modelBuilder.Entity("KFS.Domain.Entities.Booking", b =>

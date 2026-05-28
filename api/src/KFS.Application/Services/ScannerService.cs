@@ -58,24 +58,25 @@ public class ScannerService : IScannerService
             return Fail(ScanResult.Invalid, "Ticket not found or not confirmed.");
         }
 
-        var prior = await _db.ScanLogs.FirstOrDefaultAsync(s =>
-            s.ItemId == item.Id && s.ScannedItemType == ScannedItemType.BookingItem && s.Result == ScanResult.Valid, ct);
-        if (prior != null)
-        {
-            await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.AlreadyUsed, ip, device, ct);
-            return new ScanResponse(false, ScanResult.AlreadyUsed, ScannedItemType.BookingItem,
-                item.Zone!.DisplayName, item.Seat!.FullLabel, 1,
-                $"{item.Booking.Student?.FirstName} {item.Booking.Student?.LastName}".Trim(),
-                true, prior.ScannedAt, $"Already scanned at {prior.ScannedAt:HH:mm}");
-        }
-
-        await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.Valid, ip, device, ct);
+        // A seat ticket admits exactly one person.
+        var firstPrior = await _db.ScanLogs
+            .Where(s => s.ItemId == item.Id && s.ScannedItemType == ScannedItemType.BookingItem && s.Result == ScanResult.Valid)
+            .OrderBy(s => s.ScannedAt).FirstOrDefaultAsync(ct);
         var holder = item.Booking.Student is null ? null
             : $"{item.ParentRole} of {item.Booking.Student.FirstName} {item.Booking.Student.LastName}";
 
+        if (firstPrior != null)
+        {
+            await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.AlreadyUsed, ip, device, ct);
+            return new ScanResponse(false, ScanResult.AlreadyUsed, ScannedItemType.BookingItem,
+                item.Zone!.DisplayName, item.Seat!.FullLabel, 1, 1, holder,
+                true, firstPrior.ScannedAt, $"Already scanned at {firstPrior.ScannedAt:HH:mm}.");
+        }
+
+        await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.Valid, ip, device, ct);
         return new ScanResponse(true, ScanResult.Valid, ScannedItemType.BookingItem,
-            item.Zone!.DisplayName, item.Seat!.FullLabel, 1, holder, false, null,
-            $"Welcome — {item.Zone.DisplayName}, Seat {item.Seat.FullLabel}");
+            item.Zone!.DisplayName, item.Seat!.FullLabel, 1, 1, holder, false, null,
+            $"Welcome — {item.Zone.DisplayName}, Seat {item.Seat.FullLabel}.");
     }
 
     private async Task<ScanResponse> VerifyAdminPassAsync(QrPayloadDecoded payload, string? ip, string? device, CancellationToken ct)
@@ -87,22 +88,35 @@ public class ScannerService : IScannerService
             return Fail(ScanResult.Invalid, "Pass not found.");
         }
 
-        var prior = await _db.ScanLogs.FirstOrDefaultAsync(s =>
-            s.ItemId == pass.Id && s.ScannedItemType == ScannedItemType.AdminPass && s.Result == ScanResult.Valid, ct);
-        if (prior != null)
+        // A pass admits up to SeatsCount people (Guest = 3), one per scan. Each valid scan logs
+        // one admission; once SeatsCount admissions are used, further scans are rejected.
+        var allowed = Math.Max(1, pass.SeatsCount);
+        var priorScans = await _db.ScanLogs
+            .Where(s => s.ItemId == pass.Id && s.ScannedItemType == ScannedItemType.AdminPass && s.Result == ScanResult.Valid)
+            .OrderBy(s => s.ScannedAt).ToListAsync(ct);
+        var used = priorScans.Count;
+
+        if (used >= allowed)
         {
             await LogAsync(ScannedItemType.AdminPass, pass.Id, ScanResult.AlreadyUsed, ip, device, ct);
+            var first = priorScans.First().ScannedAt;
             return new ScanResponse(false, ScanResult.AlreadyUsed, ScannedItemType.AdminPass,
-                pass.Type.ToString(), null, pass.SeatsCount, pass.IssuedToName,
-                true, prior.ScannedAt, $"Already scanned at {prior.ScannedAt:HH:mm}");
+                pass.Type.ToString(), null, allowed, used, pass.IssuedToName, true, first,
+                allowed > 1
+                    ? $"All {allowed} admissions already used (first at {first:HH:mm})."
+                    : $"Already scanned at {first:HH:mm}.");
         }
 
         await LogAsync(ScannedItemType.AdminPass, pass.Id, ScanResult.Valid, ip, device, ct);
-        var msg = pass.SeatsCount > 1
-            ? $"Welcome — {pass.Type}. Group of {pass.SeatsCount} — please admit {pass.SeatsCount} people."
+        var admitted = used + 1;
+        var remaining = allowed - admitted;
+        var msg = allowed > 1
+            ? (remaining > 0
+                ? $"Admit 1 — {pass.Type}. Person {admitted} of {allowed}; {remaining} entr{(remaining == 1 ? "y" : "ies")} left."
+                : $"Admit 1 — {pass.Type}. Person {admitted} of {allowed} — final entry.")
             : $"Welcome — {pass.Type}.";
         return new ScanResponse(true, ScanResult.Valid, ScannedItemType.AdminPass, pass.Type.ToString(),
-            null, pass.SeatsCount, pass.IssuedToName, false, null, msg);
+            null, allowed, admitted, pass.IssuedToName, false, null, msg);
     }
 
     private async Task LogAsync(ScannedItemType type, Guid? id, ScanResult result, string? ip, string? device, CancellationToken ct)
@@ -115,5 +129,5 @@ public class ScannerService : IScannerService
     }
 
     private static ScanResponse Fail(ScanResult result, string message) =>
-        new(false, result, null, null, null, null, null, false, null, message);
+        new(false, result, null, null, null, null, 0, null, false, null, message);
 }

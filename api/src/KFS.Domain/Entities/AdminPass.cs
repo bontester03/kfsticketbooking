@@ -19,5 +19,12 @@ public class AdminPass : BaseEntity
     public int SeatsCount { get; set; } = 1;
     public string? IssuedToName { get; set; }
     public Guid? IssuedByAdminId { get; set; }
+
+    // Set when a pass is tied to a specific child: a student self-books a Guest ticket
+    // (IssuedByAdminId == null) or an admin issues one to that child (IssuedByAdminId != null).
+    // Null for the general admin-issued pool (VVIP/Staff/Media and unassigned Guest passes).
+    public Guid? StudentId { get; set; }
+    public Student? Student { get; set; }
+
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
 }

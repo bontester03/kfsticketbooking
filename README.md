@@ -1,105 +1,245 @@
 # KFS School Event — Ticket Booking & QR Verification Platform
 
-Reference implementation of [kfs_ticket_booking_prompt_v2 (1).md](kfs_ticket_booking_prompt_v2%20%281%29.md) (the spec that supersedes the original v2). Every architectural call is captured in [DECISIONS.md](DECISIONS.md).
+A full-stack platform for King Faisal School's Annual Function: parents reserve VIP seats and Guest tickets through a portal, admins manage the roster / generate VVIP-Guest-Staff-Media QR passes / monitor scans, and gate staff verify tickets through an iPad camera scanner — all backed by a single .NET 8 API and PostgreSQL.
 
-> **Build status (this commit)**
-> - ✅ Backend: complete (.NET 8 + EF Core + PostgreSQL via Npgsql, all v2 endpoints, paired-seat concurrency, QR generation, PDF/ZIP pass batches, scanner verify, SignalR live seat map, background jobs, console-output email, seeded database)
-> - ✅ **Portal** (student-facing): complete — login, force-password-change, group/side picker, seat picker, cart with countdown, my bookings with branded ticket card, KFS forest/sage/gold theme, i18next ar/en + RTL, Asia/Riyadh date formatting
-> - 🟡 **Admin** & **Scanner** apps: shells exist; full pages land in subsequent passes
-> - 🟡 Tests: structure scaffolded; concurrency + frontend tests next pass
-> - ✅ Azure CI: GitHub Actions OIDC deploy to UAE North via Bicep templates in `/infra/`
+Originally built from [`kfs_ticket_booking_prompt_v2 (2).md`](kfs_ticket_booking_prompt_v2%20%282%29.md); every architectural call is captured in [DECISIONS.md](DECISIONS.md).
 
-## Architecture
+---
+
+## What's in the box
 
 ```
 KFS/
-├── api/                              ASP.NET Core 8 Web API
+├── api/                              ASP.NET Core 8 + EF Core + PostgreSQL
 │   ├── KFS.sln
-│   ├── src/
-│   │   ├── KFS.Domain/               Entities, enums (no dependencies)
-│   │   ├── KFS.Application/          DTOs, service contracts + implementations, validators
-│   │   ├── KFS.Infrastructure/       EF Core Npgsql, JWT, QR (QRCoder), PDF (QuestPDF),
-│   │   │                             Excel (ClosedXML), email, blob storage, seeding
-│   │   └── KFS.Api/                  Controllers, SignalR hubs, IHostedService jobs,
-│   │                                 middleware, Program.cs, settings
-│   └── tests/
-│       └── KFS.Tests/                xUnit + FluentAssertions
+│   └── src/
+│       ├── KFS.Domain/               Entities, enums (no dependencies)
+│       ├── KFS.Application/          DTOs, service interfaces + implementations, validators
+│       ├── KFS.Infrastructure/       EF Npgsql, JWT, QR (QRCoder), PDF (QuestPDF),
+│       │                             Excel (ClosedXML), SMTP email, blob storage
+│       └── KFS.Api/                  Controllers, SignalR hubs, hosted-services, middleware
 │
-├── web/                              pnpm workspace (Vite + React + Tailwind)
-│   ├── apps/portal                   Student portal (Arabic default, RTL)
-│   ├── apps/admin                    Admin console (English default) — shell only this pass
-│   ├── apps/scanner                  Gate scanner PWA — shell only this pass
+├── web/                              pnpm workspace (Vite + React 18 + TypeScript)
+│   ├── apps/portal/                  Parent/student booking portal
+│   ├── apps/admin/                   Admin console (full)
+│   ├── apps/scanner/                 Gate scanner (iPad camera, tokened link)
 │   └── packages/{ui,api-client,types,utils,i18n}
+│
 ├── infra/                            Bicep templates for Azure UAE North
-├── docker-compose.yml                api + postgres + azurite + portal + admin + scanner
-├── DECISIONS.md                      every non-obvious architectural choice
-├── kfs_ticket_booking_prompt_v2 (2).md   the source spec (current)
-└── .env.example                      copy → .env
+├── docker-compose.yml                api + postgres + azurite + 3 web apps
+├── DECISIONS.md                      Every non-obvious architectural choice
+└── .env.example                      Copy → .env (gitignored)
 ```
 
-## Stack
+### Apps and what they do
 
-| Concern              | Choice                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| API                  | ASP.NET Core 8, C# 12                                                                 |
-| Persistence          | PostgreSQL 16, EF Core 8 (`Npgsql.EntityFrameworkCore.PostgreSQL`), code-first migrations |
-| Real-time            | SignalR (`/hubs/seatmap`)                                                             |
-| Auth                 | JWT (15-min access, 7-day refresh, hashed in DB), BCrypt password hashing             |
-| Validation           | FluentValidation                                                                      |
-| QR                   | QRCoder (signed JWT payload, separate signing key from auth)                          |
-| PDF / Excel          | QuestPDF, ClosedXML                                                                   |
-| Emails               | `IEmailService` abstraction; default writes HTML + attachments to `logs/email/`       |
-| Blob storage         | `IBlobStorage`; default writes to `wwwroot/` served at `/static/`                     |
-| Background jobs      | `IHostedService` + `PeriodicTimer` (cart sweeper, rebook expirer, day-before reminder)|
-| Logging              | Serilog (console + rolling file)                                                      |
-| API docs             | Swashbuckle / OpenAPI                                                                 |
-| Web monorepo         | pnpm workspaces + Turborepo                                                           |
-| Web framework        | Vite + React 18 + TypeScript                                                          |
-| Server state         | TanStack Query v5                                                                     |
-| Client state         | Zustand (auth)                                                                        |
-| Forms                | React Hook Form + Zod                                                                 |
-| i18n                 | i18next + react-i18next; English + Arabic with RTL                                    |
-| Brand tokens         | KFS forest `#0d3128` / sage `#548b7d` / gold `#a08b16`                                |
-| Fonts                | Source Sans 3 Variable (English) + IBM Plex Sans Arabic (Arabic; Janna LT swap path documented in DECISIONS.md) |
-| Time zone            | Asia/Riyadh everywhere (Windows id `Arab Standard Time`, NOT `Arabian Standard Time`) |
+| App | Port | Who uses it | What it does |
+|---|---|---|---|
+| **Portal** | 5173 | Parents / students | Sign in, see assigned VIP group, pick a seat (system auto-pairs Mother/Father across Female/Male sides), book a Guest ticket, download tickets PDF, see scan status. |
+| **Admin** | 5174 | School office staff | Roster upload, "Send welcome emails", per-type pass limits, Generate/Preview/Delete passes (PDF or ZIP), Guest analytics + issue-to-child, **Scan audit** with type/status filters, Live seat map, Reports, Reminders, Event settings. |
+| **Scanner** | 5175 | Gate staff (iPad) | Tokened deep-link opens the camera; jsQR decodes; one POST to `/scan/verify`. Single-use tickets reject the 2nd scan; Guest tickets allow 3 admissions then reject. |
 
-## Quick start (Docker)
+---
+
+## Quick start
 
 ```bash
 cp .env.example .env
-# Edit JWT_SECRET, QR_SIGNING_KEY, and SUPER_ADMIN_PASSWORD to strong randoms.
+# Set strong randoms for JWT_SECRET, QR_SIGNING_KEY, SUPER_ADMIN_PASSWORD.
+# (See "Email" below for optional SMTP settings.)
 docker compose up --build
 ```
 
-| Service       | URL / port                                 |
-| ------------- | ------------------------------------------ |
-| **Portal**    | <http://localhost:5173>                    |
-| **Admin**     | <http://localhost:5174>                    |
-| **Scanner**   | <http://localhost:5175>                    |
-| API           | <http://localhost:5080/api/v1>             |
-| Swagger       | <http://localhost:5080/swagger>            |
-| SignalR       | `ws://localhost:5080/hubs/seatmap`         |
-| PostgreSQL    | `localhost:5432` (kfs / `POSTGRES_PASSWORD`) |
-| Azurite       | <http://localhost:10000/devstoreaccount1>  |
+| Surface | URL |
+|---|---|
+| Portal (parents) | <http://localhost:5173> |
+| Admin console | <http://localhost:5174> |
+| Scanner (gate) | <http://localhost:5175> |
+| API + Swagger | <http://localhost:5080/swagger> |
+| Public event endpoint (sign-in banner) | <http://localhost:5080/api/v1/public/event> |
+| PostgreSQL | `localhost:5432` (kfs / `POSTGRES_PASSWORD`) |
+| Azurite (blob) | <http://localhost:10000/devstoreaccount1> |
 
-The first start runs EF Core migrations and seeds: 1 active event, 8 zones, 304 VIP seats, 1 super-admin (`admin@kfs.sch.sa`), 5 sample students.
+On first boot the API applies EF migrations and seeds: 1 active event, 8 zones, 304 VIP seats, 1 super-admin, 5 sample students.
 
-### Default credentials (change immediately)
+### Default credentials
 
-| Role    | Email / Login           | Password                                 |
-| ------- | ----------------------- | ---------------------------------------- |
-| Admin   | `admin@kfs.sch.sa`      | `SUPER_ADMIN_PASSWORD` env (`Admin@123`) |
-| Student | `safa.albuhairan@stu.kfs.sch.sa` | `Saf15032010` (3-letter capitalised first name + DDMMYYYY) |
-| Student | `layan.alqahtani@stu.kfs.sch.sa` | `Lay22062009` |
-| Student | `yousef.almutairi@stu.kfs.sch.sa` | `You04112010` |
-| Student | `reem.alotaibi@stu.kfs.sch.sa` | `Ree30012009` |
-| Student | `khalid.alharbi@stu.kfs.sch.sa` | `Kha12082010` |
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@kfs.sch.sa` | `${SUPER_ADMIN_PASSWORD}` (`Admin@123` default) |
+| Sample student | `safa.albuhairan@stu.kfs.sch.sa` | `Saf15032010` *(legacy seed: First3 + DDMMYYYY)* |
 
-All accounts are flagged `MustChangePassword = true`.
+After you upload a real roster from the admin app, each student's initial password becomes **`First3Cap + StudentID`** (e.g. `Ahm437079`). All accounts start with `MustChangePassword = true`.
 
-## Frontend dev (no Docker, hot reload)
+---
+
+## Roster upload — column layout
+
+Admin → **Students** → **Download sample (.xlsx)** for the exact template. Columns, in order:
+
+| # | Column | Required | Notes |
+|---|---|---|---|
+| 1 | Student ID | optional | School roster number (used for the initial password). |
+| 2 | First Name | **yes** | Drives the password prefix (first 3 letters, capitalised). |
+| 3 | Last Name | **yes** | |
+| 4 | Preferred Name | optional | Arabic / display name. |
+| 5 | Email | **yes** | Login identifier. |
+| 6 | Gender | optional | |
+| 7 | Grade | optional | |
+| 8 | Group | optional | `VIP A` / `VIP B` (also accepts `A` / `B`). Pre-assigns the child's section. |
+
+After uploading, click **Send welcome emails** — every active student is reset to their initial password and emailed sign-in instructions with the KFS logo footer.
+
+---
+
+## VIP group assignment — booking is enforced
+
+When the roster has a Group column filled in:
+- The student's `AssignedGroup` (A or B) ships back in `AuthResponse`.
+- The portal auto-routes past the A/B picker straight to that section's seat map.
+- The API rejects `POST /cart/select` for any other group with `400 wrong_group`.
+
+If the column is left blank for some students, those keep the old "pick A or B" behaviour.
+
+---
+
+## Scan engine
+
+`POST /api/v1/scan/verify` takes a QR payload (signed-JWT, distinct signing key from auth) and the event scanner token. The same code path handles:
+
+- **Booking items** (parent seats) — single-use. 2nd scan returns `AlreadyUsed` with the time of the first valid scan.
+- **Admin passes** — admit up to `SeatsCount` people, one per scan.
+  - VVIP / Staff / Media: 1 scan.
+  - Guest: **3 admissions** then `AlreadyUsed`. Response includes `admittedCount` so the gate display can show "Person 2 of 3, 1 entry left".
+
+Every valid and rejected scan is logged in `scan_logs`. The admin **Scans** tab exposes this audit:
+- Filters: **Ticket type** (VVIP / Guest / Staff / Media / Student seat) · **Status** (All / Scanned / Not scanned) · free-text search by ticket # or holder.
+- Per-row: ticket #, holder, detail (zone/seat), Scanned Yes/No (`N/M` for guest), first → last scan time.
+
+### Scanner deep link
+
+```
+http://<scanner-host>/?token=<event.scanner_token>
+```
+
+- Admin can copy this from **Guest → Gate scanner link**.
+- The scanner caches the token in `localStorage`; if the server ever returns "Scanner token invalid", the app self-heals back to the token entry screen.
+- **iPad note:** the camera API requires HTTPS or `localhost`. On the deployed (Azure) URL it works; on a plain `http://<pc-ip>` LAN URL it won't — the Manual entry box is the fallback.
+- jsQR is loaded from a CDN (`cdn.jsdelivr.net`) because the corporate proxy blocks bundling it.
+
+---
+
+## Tickets a parent sees
+
+Two surfaces, both visible from the portal **after a confirmed booking**:
+
+1. **The on-screen ticket card** — same design as the printed reference: violet category badge, GATE / BLOCK / SEAT / ROW grid, Arabic seat-pair line, *"Ticket is sent to ... "* receipt + QR.
+2. **Download tickets PDF** button — produces `{name}-tickets.pdf` with one card per page: each parent pass (Mother / Father) plus the Guest ticket (if booked). Same visual language, embedded Dubai font for the Arabic.
+
+A child can also book **one Guest ticket** (`POST /guest`) — one QR that admits 3, shown on the portal **Guest ticket** page, with live scan status (`2 of 3 admitted`).
+
+---
+
+## Email
+
+The API ships with two `IEmailService` implementations:
+
+- **ConsoleEmailService** (default) — writes the rendered HTML + attachments to `/app/logs/email/...`. No external dependency; great for dev.
+- **SmtpEmailService** — real SMTP. Tested with **Gmail / Google Workspace** (`smtp.gmail.com:587`, STARTTLS, app-password auth). Microsoft 365 (`smtp.office365.com:587`) also wired but requires tenant-level `SmtpClientAuthentication` to be allowed.
+
+Set in `.env` (gitignored):
 
 ```bash
+EMAIL_PROVIDER=Smtp           # or Console
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USERNAME=<the-mailbox>
+EMAIL_PASSWORD=<16-char Google App Password (no spaces)>
+EMAIL_FROM=<same as username>
+EMAIL_FROM_NAME=King Faisal School
+EMAIL_PORTAL_URL=http://localhost:5173
+
+# Local dev only — accept a corporate proxy's intercepting cert on the SMTP TLS handshake.
+# DO NOT set this on the Azure deploy.
+EMAIL_ACCEPT_INVALID_CERT=true
+```
+
+Then `docker compose up -d --force-recreate api` to pick up the new env.
+
+Emails sent by the API:
+- **Booking confirmation** (one per ticket, with QR PNG attachment)
+- **Welcome email** (bulk, after roster upload) — credentials + booking steps + inline KFS logo footer
+- **Password reset** (admin clicks Reset password on a student) — fire-and-forget so the admin sees the new password instantly even if SMTP is slow
+
+---
+
+## REST endpoints (under `/api/v1`)
+
+### Auth
+- `POST /auth/login` (student) · `POST /auth/admin/login`
+- `POST /auth/refresh`
+- `POST /auth/forgot-password` / `POST /auth/reset-password`
+- `POST /auth/change-password`
+
+### Public (no auth)
+- `GET /public/event` — safe aggregates for the sign-in banner (name, date, venue, seats remaining)
+- `POST /scan/verify` — gated by the event scanner token, not by login
+
+### Student (role `Student`)
+- `GET /me` · `GET /me/tickets.pdf`
+- `GET /events/active` · `GET /events/{id}/seatmap?group=A|B`
+- `GET /cart` · `POST /cart/select` · `DELETE /cart` · `POST /cart/checkout`
+- `GET /bookings` · `POST /bookings/{id}/cancel` · `POST /bookings/{id}/resend-emails`
+- `GET /guest` · `POST /guest`
+
+### Admin (role `Admin`)
+- Students: `POST/GET/PATCH/DELETE /admin/students/...`, `POST upload`, `GET sample`, `POST {id}/reset-password`, `POST send-welcome-emails`
+- Passes: `GET/POST/DELETE /admin/passes/...`, `GET batches`, `DELETE batches/{id}` and `DELETE batches?type=`, `GET batches/{id}/download?format=pdf|zip`, `GET/PUT quota`
+- Guest: `GET analytics`, `GET students`, `POST issue`
+- Bookings: `GET /admin/bookings`, `GET /admin/seatmap?group=`, `POST {id}/force-cancel`
+- Scans: `GET /admin/scans?search=&status=&kind=`
+- Reports: `GET /admin/reports/dashboard`, `GET /admin/reports/group/{A|B}?format=csv|xlsx|pdf`
+- Reminders: `POST /admin/reminders/unbooked`, `GET /admin/reminders/logs`
+- Event: `GET /admin/event`, `PUT /admin/event/{id}`
+
+### SignalR
+- `/hubs/seatmap` — `JoinGroup(eventId, group)` / `LeaveGroup(eventId, group)`; emits `seat-changed`.
+
+---
+
+## Stack
+
+| Concern | Choice |
+|---|---|
+| API | ASP.NET Core 8, C# 12 |
+| Persistence | PostgreSQL 16, EF Core 8 (Npgsql), code-first migrations |
+| Real-time | SignalR (`/hubs/seatmap`) |
+| Auth | JWT (15-min access + 7-day refresh, hashed in DB), BCrypt |
+| QR | QRCoder; payload = signed JWT (separate signing key from auth) |
+| PDF | QuestPDF + bundled **Dubai** font (Arabic + Latin) |
+| Excel | ClosedXML |
+| Emails | `IEmailService` + `SmtpEmailService` (System.Net.Mail) |
+| Blob storage | `IBlobStorage` (`AzureBlobStorage` via Azurite locally; SAS re-signed on every read) |
+| Background jobs | `IHostedService` + `PeriodicTimer` |
+| Logging | Serilog (console + rolling file) |
+| Web monorepo | pnpm workspaces + Turborepo |
+| Web framework | Vite + React 18 + TypeScript |
+| Server state | TanStack Query v5 |
+| Client state | Zustand (auth) |
+| Forms | React Hook Form + Zod |
+| i18n | i18next (English + Arabic with RTL) |
+| QR decoder (web) | jsQR from CDN |
+| Brand tokens | KFS forest `#0d3128` · sage `#548b7d` · gold `#a08b16` · sign-in panel teal `#124D41` |
+| Fonts (web) | Source Sans 3 (Latin) + IBM Plex Sans Arabic |
+| Fonts (PDF) | Dubai (Latin + Arabic) — bundled in `KFS.Infrastructure/Pdf/Fonts` |
+| Time zone | Asia/Riyadh (Windows id `Arab Standard Time`, NOT `Arabian Standard Time`) |
+
+---
+
+## Local dev (no Docker, hot reload)
+
+```bash
+# Web — three Vite dev servers
 cd web
 corepack enable && corepack prepare pnpm@9.7.0 --activate   # one-time
 pnpm install
@@ -108,143 +248,58 @@ pnpm --filter admin dev     # http://localhost:5174
 pnpm --filter scanner dev   # http://localhost:5175
 ```
 
-Each Vite dev server proxies `/api` and `/hubs` to `http://localhost:5080` (the API container or `dotnet run`). Brand tokens (forest/sage/gold) live in [`web/packages/ui/tailwind-preset.cjs`](web/packages/ui/tailwind-preset.cjs); fonts bundled via `@fontsource-variable/source-sans-3` (English) and `@fontsource/ibm-plex-sans-arabic` (Arabic) — see [DECISIONS.md](DECISIONS.md) on the Janna LT swap path.
-
-## Backend dev (no Docker)
+Each Vite dev server proxies `/api` and `/hubs` to `http://localhost:5080`.
 
 ```bash
-# Start a local Postgres (any way you like). Easiest is Docker:
+# API — needs Postgres. Easiest:
 docker run --name kfs-pg -e POSTGRES_PASSWORD=kfs -e POSTGRES_USER=kfs \
   -e POSTGRES_DB=kfs -p 5432:5432 -d postgres:16-alpine
 
-cd api
-dotnet restore
-
-# First-time setup: generate the initial migration. The seeder gracefully falls back to
-# EnsureCreated if you skip this, but committing migrations is the supported flow.
-dotnet ef migrations add InitialCreate \
-    --project src/KFS.Infrastructure \
-    --startup-project src/KFS.Api
-
-dotnet run --project src/KFS.Api
+cd api && dotnet run --project src/KFS.Api
 ```
 
-Open http://localhost:5080/swagger. Subsequent migrations:
+Open <http://localhost:5080/swagger>.
+
+### EF migrations
 
 ```bash
 dotnet ef migrations add <Name> \
-    --project src/KFS.Infrastructure \
-    --startup-project src/KFS.Api
+  --project src/KFS.Infrastructure --startup-project src/KFS.Api
 
 dotnet ef database update \
-    --project src/KFS.Infrastructure \
-    --startup-project src/KFS.Api
+  --project src/KFS.Infrastructure --startup-project src/KFS.Api
 ```
 
-## REST endpoints (all under `/api/v1`)
+Migrations apply automatically on container start (`Database__RunMigrationsOnStartup=true`).
 
-### Auth (no role)
-- `POST /auth/login` (student)
-- `POST /auth/admin/login`
-- `POST /auth/refresh`
-- `POST /auth/forgot-password` / `POST /auth/reset-password`
-- `POST /auth/change-password` (any authenticated user)
+---
 
-### Student (role `Student`)
-- `GET  /me`
-- `GET  /events/active`
-- `GET  /events/{id}/seatmap?group=A|B`
-- `GET  /cart` / `POST /cart/select` / `DELETE /cart` / `POST /cart/checkout`
-- `GET  /bookings` / `POST /bookings/{id}/cancel` / `POST /bookings/{id}/resend-emails`
+## Behind a corporate TLS proxy
 
-### Admin (role `Admin`)
-- Students: `POST /admin/students/upload`, `GET/PATCH /admin/students/...`, `POST /admin/students/{id}/reset-password`
-- Passes: `POST /admin/passes/generate`, `GET /admin/passes/batches`, `GET /admin/passes`, `PATCH /admin/passes/{id}`, `GET /admin/passes/batches/{id}/download?format=pdf|zip`
-- Bookings: `GET /admin/bookings`, `GET /admin/seatmap?group=`, `POST /admin/bookings/{id}/force-cancel`
-- Reports: `GET /admin/reports/dashboard`, `GET /admin/reports/group/{A|B}?format=csv|xlsx|pdf`
-- Reminders: `POST /admin/reminders/unbooked`, `GET /admin/reminders/logs`
-- Event: `GET /admin/event`, `PUT /admin/event/{id}`
+If your network intercepts HTTPS (causing `UNABLE_TO_VERIFY_LEAF_SIGNATURE` on npm or `UntrustedRoot` on .NET):
 
-### Scanner (no auth, requires `eventToken` in body)
-- `POST /scan/verify`
+- **Git** — `git config --global http.sslBackend schannel` (uses the Windows cert store).
+- **Docker frontend builds (npm)** — they fail through the proxy. Workaround: build dist locally (`pnpm --filter <app> build`) and `docker cp` it into the running container (`docker cp web/apps/portal/dist/. kfs-portal:/usr/share/nginx/html/`).
+- **Docker API builds (NuGet)** — same. Publish locally (`dotnet publish ... -o /tmp/api_publish`) and `docker cp` into `kfs-api:/app/` then `docker restart kfs-api`.
+- **SMTP** — set `EMAIL_ACCEPT_INVALID_CERT=true` in `.env` (dev only; do not enable in production).
 
-### SignalR
-- `/hubs/seatmap` — `JoinGroup(eventId, group)` / `LeaveGroup(eventId, group)`; receives `seat-changed` events.
+These are documented in DECISIONS.md alongside the Azure deploy notes.
 
-## Required env vars (production)
+---
 
-| Variable                  | Notes                                                         |
-| ------------------------- | ------------------------------------------------------------- |
-| `ConnectionStrings__Default` | PostgreSQL key=value string (or set `DATABASE_URL` and the API translates it) |
-| `Jwt__Secret`             | ≥32 chars, never commit                                       |
-| `Qr__SigningKey`          | ≥32 chars, **separate** from `Jwt__Secret`                    |
-| `Auth__SuperAdminPassword`| Initial super-admin password (only used on first boot)        |
-| `Cors__AllowedOrigins__N` | Public URL of each frontend (portal, admin, scanner)          |
-| `Database__RunMigrationsOnStartup` | `true` for self-managed deploys                      |
-| `Swagger__Enabled`        | `false` in production                                         |
+## Azure deploy
 
-## Deploying to Azure UAE North
+Templates in `/infra/`. The deploy region split (added during the build):
 
-The full footprint (App Service, Postgres Flex, Storage, Key Vault, App Insights, three Static Web Apps) is described in Bicep at [infra/main.bicep](infra/main.bicep) — see [infra/README.md](infra/README.md) for the manual deploy commands.
+- **Data** (Postgres, Storage, Key Vault, App Insights) stays in **UAE North** for Saudi PDPL data residency.
+- **Compute** (App Service / API) runs in **UK South** because UAE North ships 0 App Service VM quota.
 
-### Automated deploy via GitHub Actions (OIDC)
+GitHub Actions workflow uses OIDC federation; secrets are managed in the `dev` environment in GitHub. See `infra/AZURE_SETUP.md` for the Cloud Shell runbook.
 
-[.github/workflows/deploy.yml](.github/workflows/deploy.yml) runs `what-if`, applies the Bicep, publishes the API, and smoke-tests `/healthz`. To enable:
+Deploy to Azure once the App Service VM quota is granted (see [DECISIONS.md](DECISIONS.md) for the quota request flow).
 
-1. **Create an Azure AD app registration** with federated credentials for this repo. The app needs Contributor on the resource group and User Access Administrator if you want it to grant the App Service Managed Identity its KV/Storage RBAC roles.
-2. In GitHub repo settings, add these **environment secrets** (one set per `dev`, `prod`):
-   - `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-   - `AZURE_RESOURCE_GROUP` (e.g. `rg-kfs-prod`)
-   - `POSTGRES_ADMIN_PASSWORD`, `JWT_SECRET`, `QR_SIGNING_KEY`, `SUPER_ADMIN_PASSWORD`
-3. Add a repo **variable** `AZURE_APP_NAME` (e.g. `app-kfs-prod-uaen`).
-4. Push to `main` — the workflow runs `az deployment group what-if` first, then applies.
+---
 
-### Manual deploy (one shot)
+## License & credits
 
-```bash
-az login
-az group create --name rg-kfs-prod --location uaenorth
-
-export POSTGRES_ADMIN_PASSWORD='...'
-export JWT_SECRET='...'
-export QR_SIGNING_KEY='...'
-export SUPER_ADMIN_PASSWORD='...'
-
-az deployment group create \
-  --resource-group rg-kfs-prod \
-  --template-file infra/main.bicep \
-  --parameters infra/prod.bicepparam
-```
-
-After Bicep applies, publish the API:
-
-```bash
-cd api
-dotnet publish src/KFS.Api -c Release -o ./publish
-zip -r api.zip publish
-az webapp deploy --resource-group rg-kfs-prod --name app-kfs-prod-uaen --src-path api.zip --type zip
-```
-
-Watch `/healthz` come green:
-
-```bash
-curl https://<api-public-host>/healthz
-```
-
-### What lands in Azure
-
-| Resource                          | Region        | Purpose                                                  |
-| --------------------------------- | ------------- | -------------------------------------------------------- |
-| Resource group                    | UAE North     | All PII-bearing resources                                |
-| App Service Plan + Web App        | UAE North     | API host, .NET 8 Linux                                   |
-| Postgres Flexible Server (v16)    | UAE North     | citext / pgcrypto / pg_trgm enabled                      |
-| Storage Account                   | UAE North     | Containers `qr-codes`, `printable-batches`               |
-| Key Vault                         | UAE North     | JWT, QR, super-admin, Postgres connection string         |
-| Application Insights              | UAE North     | Wired via `APPLICATIONINSIGHTS_CONNECTION_STRING`        |
-| Static Web App × 3                | centralus     | `portal`, `admin`, `scanner` (SWA not yet GA in UAE N)   |
-
-The App Service uses **Managed Identity** for KV + Storage access. App Settings reference KV via `@Microsoft.KeyVault(...)` — secrets never appear in the App Settings blade plaintext.
-
-## What's deferred (next passes)
-
-See [DECISIONS.md → "What is NOT in this commit"](DECISIONS.md#what-is-not-in-this-commit) for the full list. Headlines: React frontends, Playwright e2e tests, GitHub Actions for Azure deploy, real SendGrid integration, Azure Blob.
+Internal project for King Faisal School. Dubai font (Arabic + Latin) bundled under its free-use licence. jsQR licensed MIT and loaded from CDN at runtime.

@@ -1,11 +1,24 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card } from '@kfs/ui';
 import { useTranslation } from '@kfs/i18n';
+import { useAuthStore } from '@kfs/api-client';
 
 export default function GroupSelectPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const pick = (group: 'A' | 'B') => navigate(`/book/seats?group=${group}&side=Female`);
+  const assignedGroup = useAuthStore((s) => s.assignedGroup);
+  const pick = (group: 'A' | 'B') => navigate(`/book/seats?group=${group}&side=Female`, { replace: true });
+
+  // If the school has pre-assigned this student to VIP A or VIP B, skip the picker entirely.
+  useEffect(() => {
+    if (assignedGroup === 1) pick('A');
+    else if (assignedGroup === 2) pick('B');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignedGroup]);
+
+  // Pre-assigned: render nothing while the redirect runs.
+  if (assignedGroup === 1 || assignedGroup === 2) return null;
 
   return (
     <div className="grid gap-6">

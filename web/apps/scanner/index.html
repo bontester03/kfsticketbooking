@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0d3128" />
     <title>KFS Booking — Scanner</title>
+    <!-- jsQR loaded from CDN (the corporate proxy blocks bundling it at build time).
+         The iPad / browser fetches it directly. Exposes a global `jsQR`. -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   </head>
   <body>
     <div id="root"></div>

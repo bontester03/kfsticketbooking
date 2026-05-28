@@ -11,6 +11,7 @@ const GroupSelectPage    = lazy(() => import('./pages/GroupSelectPage'));
 const SeatMapPage        = lazy(() => import('./pages/SeatMapPage'));
 const CartPage           = lazy(() => import('./pages/CartPage'));
 const MyBookingsPage     = lazy(() => import('./pages/MyBookingsPage'));
+const GuestTicketPage    = lazy(() => import('./pages/GuestTicketPage'));
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/book/seats" element={<SeatMapPage />} />
           <Route path="/cart" element={<CartPage />} />
           <Route path="/bookings" element={<MyBookingsPage />} />
+          <Route path="/guest" element={<GuestTicketPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,6 +1,7 @@
 namespace KFS.Application.Interfaces;
 
-public record EmailAttachment(string FileName, string ContentType, byte[] Content);
+// ContentId set → embedded inline (referenced from HTML via cid:<ContentId>); otherwise a regular attachment.
+public record EmailAttachment(string FileName, string ContentType, byte[] Content, string? ContentId = null);
 
 public record OutgoingEmail(
     string To,

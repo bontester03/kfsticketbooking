@@ -51,6 +51,14 @@ public class BookingService : IBookingService
         if (request.Side is not (ZoneSide.Female or ZoneSide.Male))
             throw new AppException("bad_input", "Side must be Female or Male.");
 
+        // Enforce the school's pre-assigned VIP group. A student with AssignedGroup set may only
+        // book seats in that group; nulls (legacy data) keep the old "pick any" behaviour.
+        var student = await _db.Students.FirstOrDefaultAsync(s => s.Id == studentId, ct)
+            ?? throw new AppException("unauthorized", "Student not found.", 401);
+        if (student.AssignedGroup.HasValue && student.AssignedGroup.Value != request.Group)
+            throw new AppException("wrong_group",
+                $"Your booking is restricted to VIP {(student.AssignedGroup.Value == ZoneGroup.A ? "A" : "B")}.");
+
         var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
             ?? throw new AppException("no_active_event", "No active event.", 409);
 
@@ -257,7 +265,26 @@ public class BookingService : IBookingService
             .Include(b => b.Items).ThenInclude(i => i.Seat)
             .OrderByDescending(b => b.CreatedAt)
             .ToListAsync(ct);
-        return bookings.Select(Map).ToList();
+
+        // Annotate each ticket with its scan status so the child sees "scanned at the gate".
+        var itemIds = bookings.SelectMany(b => b.Items.Select(i => i.Id)).ToList();
+        var scans = await _db.ScanLogs
+            .Where(s => s.ScannedItemType == ScannedItemType.BookingItem && s.Result == ScanResult.Valid
+                        && s.ItemId != null && itemIds.Contains(s.ItemId.Value))
+            .GroupBy(s => s.ItemId!.Value)
+            .Select(g => new { ItemId = g.Key, ScannedAt = g.Min(x => x.ScannedAt) })
+            .ToListAsync(ct);
+        var scanByItem = scans.ToDictionary(x => x.ItemId, x => x.ScannedAt);
+
+        return bookings.Select(b =>
+        {
+            var dto = Map(b);
+            return dto with
+            {
+                Items = dto.Items.Select(it =>
+                    scanByItem.TryGetValue(it.Id, out var at) ? it with { Scanned = true, ScannedAt = at } : it).ToList()
+            };
+        }).ToList();
     }
 
     public async Task<BookingDto> CancelBookingAsync(Guid bookingId, CancellationToken ct = default)

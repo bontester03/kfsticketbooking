@@ -17,6 +17,33 @@ public class EventService : IEventService
         return Map(ev);
     }
 
+    public async Task<PublicEventDto?> GetPublicSummaryAsync(CancellationToken ct = default)
+    {
+        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
+        if (ev is null) return null;
+
+        // Bookable student seats live in the reserved-seating (VIP) zones.
+        var reservedZoneIds = await _db.Zones
+            .Where(z => z.EventId == ev.Id && z.IsReservedSeating)
+            .Select(z => z.Id).ToListAsync(ct);
+
+        var seatsTotal = await _db.Seats.CountAsync(s => reservedZoneIds.Contains(s.ZoneId), ct);
+
+        var activeStatuses = new[]
+        {
+            Domain.Enums.BookingStatus.Confirmed,
+            Domain.Enums.BookingStatus.Cart,
+            Domain.Enums.BookingStatus.RebookWindow
+        };
+        var taken = await _db.BookingItems.CountAsync(bi =>
+            _db.Bookings.Any(b => b.Id == bi.BookingId && b.EventId == ev.Id && activeStatuses.Contains(b.Status)), ct);
+
+        return new PublicEventDto(
+            ev.Name, ev.EventDate, ev.Venue, ev.VenueAddress,
+            ev.BookingOpensAt, ev.BookingClosesAt,
+            seatsTotal, Math.Max(0, seatsTotal - taken));
+    }
+
     public async Task<EventDto> UpdateAsync(Guid eventId, UpdateEventRequest r, CancellationToken ct = default)
     {
         var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)

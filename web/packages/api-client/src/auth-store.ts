@@ -16,6 +16,8 @@ export interface AuthState {
   email: string | null;
   displayName: string | null;
   mustChangePassword: boolean;
+  /** Students only: 1 = VIP A, 2 = VIP B, null = not assigned. Drives the seat-picker route. */
+  assignedGroup: number | null;
   setAuth: (resp: AuthResponse) => void;
   clear: () => void;
   isAuthenticated: () => boolean;
@@ -32,6 +34,7 @@ export const useAuthStore = create<AuthState>()(
       email: null,
       displayName: null,
       mustChangePassword: false,
+      assignedGroup: null,
       setAuth: (resp) => set({
         accessToken: resp.accessToken,
         accessExpiresAt: resp.accessExpiresAt,
@@ -40,13 +43,14 @@ export const useAuthStore = create<AuthState>()(
         userId: resp.userId,
         email: resp.email,
         displayName: resp.displayName,
-        mustChangePassword: resp.mustChangePassword
+        mustChangePassword: resp.mustChangePassword,
+        assignedGroup: resp.assignedGroup ?? null
       }),
       clear: () => set({
         accessToken: null, accessExpiresAt: null,
         refreshToken: null, refreshExpiresAt: null,
         userId: null, email: null, displayName: null,
-        mustChangePassword: false
+        mustChangePassword: false, assignedGroup: null
       }),
       isAuthenticated: () => {
         const { accessToken, accessExpiresAt } = get();

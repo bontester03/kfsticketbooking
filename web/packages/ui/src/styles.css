@@ -204,6 +204,11 @@
   .ticket-category {
     @apply mt-1 inline-flex h-12 w-14 items-center justify-center rounded-md bg-violet-500 text-2xl font-bold text-white shadow-sm;
   }
+  /* Per pass-type accent so the gate can tell VVIP / Guest / Staff / Media apart at a glance. */
+  .ticket-category--vvip  { @apply bg-kfs-gold; }
+  .ticket-category--guest { @apply bg-violet-500; }
+  .ticket-category--staff { @apply bg-kfs-forest; }
+  .ticket-category--media { @apply bg-sky-500; }
 
   .ticket-info-grid { @apply grid grid-cols-4 gap-x-4; }
 

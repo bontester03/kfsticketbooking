@@ -12,10 +12,11 @@ public class StudentService : IStudentService
     private readonly IApplicationDbContext _db;
     private readonly IExcelStudentImporter _importer;
     private readonly IPasswordHasher _hasher;
+    private readonly IEmailService _email;
 
-    public StudentService(IApplicationDbContext db, IExcelStudentImporter importer, IPasswordHasher hasher)
+    public StudentService(IApplicationDbContext db, IExcelStudentImporter importer, IPasswordHasher hasher, IEmailService email)
     {
-        _db = db; _importer = importer; _hasher = hasher;
+        _db = db; _importer = importer; _hasher = hasher; _email = email;
     }
 
     public async Task<StudentImportResultDto> ImportAsync(Stream xlsxStream, CancellationToken ct = default)
@@ -43,14 +44,18 @@ public class StudentService : IStudentService
                 continue;
             }
 
-            var initialPassword = ComputeInitialPassword(row.FirstName, row.DateOfBirth);
+            var initialPassword = ComputeInitialPassword(row.FirstName, row.StudentNumber, row.DateOfBirth);
             toAdd.Add(new Student
             {
                 Email = row.Email.ToLowerInvariant(),
                 FirstName = row.FirstName,
                 LastName = row.LastName,
-                DateOfBirth = row.DateOfBirth,
+                StudentNumber = row.StudentNumber,
+                PreferredName = row.PreferredName,
+                Gender = row.Gender,
                 GradeOrClass = row.GradeOrClass,
+                AssignedGroup = row.AssignedGroup,
+                DateOfBirth = row.DateOfBirth,
                 PasswordHash = _hasher.Hash(initialPassword),
                 MustChangePassword = true,
                 IsActive = true
@@ -85,17 +90,30 @@ public class StudentService : IStudentService
 
         var students = await query.OrderBy(x => x.LastName).Skip(skip).Take(Math.Clamp(take, 1, 200)).ToListAsync(ct);
         var ids = students.Select(s => s.Id).ToList();
-        var bookings = await _db.Bookings
+
+        // Latest booking per student (with items + seats), so we can show status AND the seat labels.
+        var allBookings = await _db.Bookings
             .Where(b => ids.Contains(b.StudentId))
-            .GroupBy(b => b.StudentId)
-            .Select(g => new { StudentId = g.Key, Status = g.OrderByDescending(b => b.CreatedAt).First().Status })
+            .Include(b => b.Items).ThenInclude(i => i.Seat)
             .ToListAsync(ct);
-        var bookingByStudent = bookings.ToDictionary(b => b.StudentId, b => b.Status.ToString());
+        var latestByStudent = allBookings
+            .GroupBy(b => b.StudentId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(b => b.CreatedAt).First());
+
+        var bookingByStudent = latestByStudent.ToDictionary(kv => kv.Key, kv => kv.Value.Status.ToString());
+        var seatsByStudent = latestByStudent
+            .Where(kv => kv.Value.Status == BookingStatus.Confirmed)
+            .ToDictionary(kv => kv.Key, kv => string.Join(" & ",
+                kv.Value.Items.OrderBy(i => i.ParentRole)
+                    .Select(i => i.Seat is null ? string.Empty : $"{i.Seat.RowLabel}{i.Seat.SeatNumber}")
+                    .Where(label => !string.IsNullOrEmpty(label))));
 
         return students.Select(s => new StudentDto(
             s.Id, s.Email, s.FirstName, s.LastName, s.DateOfBirth, s.GradeOrClass,
             s.IsActive, s.MustChangePassword,
-            bookingByStudent.TryGetValue(s.Id, out var st) ? st : null, s.CreatedAt)).ToList();
+            bookingByStudent.TryGetValue(s.Id, out var st) ? st : null, s.CreatedAt,
+            seatsByStudent.TryGetValue(s.Id, out var seats) && !string.IsNullOrEmpty(seats) ? seats : null,
+            s.StudentNumber, s.PreferredName, s.Gender, s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null)).ToList();
     }
 
     public async Task<StudentDto> GetAsync(Guid id, CancellationToken ct = default)
@@ -106,7 +124,9 @@ public class StudentService : IStudentService
             .OrderByDescending(b => b.CreatedAt)
             .Select(b => (BookingStatus?)b.Status).FirstOrDefaultAsync(ct);
         return new StudentDto(s.Id, s.Email, s.FirstName, s.LastName, s.DateOfBirth, s.GradeOrClass,
-            s.IsActive, s.MustChangePassword, booking?.ToString(), s.CreatedAt);
+            s.IsActive, s.MustChangePassword, booking?.ToString(), s.CreatedAt,
+            null, s.StudentNumber, s.PreferredName, s.Gender,
+            s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null);
     }
 
     public async Task<StudentDto> UpdateAsync(Guid id, UpdateStudentRequest request, CancellationToken ct = default)
@@ -122,19 +142,186 @@ public class StudentService : IStudentService
     {
         var s = await _db.Students.FindAsync(new object[] { id }, ct)
             ?? throw new NotFoundException("Student", id);
-        var pwd = ComputeInitialPassword(s.FirstName, s.DateOfBirth);
+        var pwd = ComputeInitialPassword(s.FirstName, s.StudentNumber, s.DateOfBirth);
         s.PasswordHash = _hasher.Hash(pwd);
         s.MustChangePassword = true;
         await _db.SaveChangesAsync(ct);
+
+        // Fire-and-forget the email so the admin sees the new password instantly. A slow or
+        // failing SMTP server (auth disabled, proxy, etc.) won't block the response — the
+        // SmtpEmailService logs its own failures.
+        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
+        var eventName = ev?.Name ?? "King Faisal School Event";
+        var html = $@"
+<div style='font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#14241f'>
+  <h2 style='color:#0d3128'>Your password has been reset</h2>
+  <p>Hello {System.Net.WebUtility.HtmlEncode(s.FirstName)},</p>
+  <p>Your password for the <strong>{System.Net.WebUtility.HtmlEncode(eventName)}</strong> booking portal has been reset by the school office.</p>
+  <p style='font-size:15px'>Email: <strong>{System.Net.WebUtility.HtmlEncode(s.Email)}</strong><br/>
+     Temporary password: <strong style='font-family:monospace;font-size:16px'>{System.Net.WebUtility.HtmlEncode(pwd)}</strong></p>
+  <p>Please sign in and change it. If you didn't request this, contact the school office.</p>
+</div>";
+        var outgoing = new OutgoingEmail(s.Email, $"{eventName} — password reset", html);
+        var sender = _email;
+        _ = Task.Run(async () =>
+        {
+            try { await sender.SendAsync(outgoing, CancellationToken.None); }
+            catch { /* SmtpEmailService already logs the exception */ }
+        });
+
         return new ResetPasswordResponseDto(pwd);
     }
 
-    public static string ComputeInitialPassword(string firstName, DateTime dob)
+    public async Task<int> DeleteAllAsync(CancellationToken ct = default)
+    {
+        // FK-safe order: scans referencing student tickets → booking items → bookings →
+        // student-linked admin passes (+ their scans) → password resets → students.
+        var bookingIds = await _db.Bookings.Select(b => b.Id).ToListAsync(ct);
+        if (bookingIds.Count > 0)
+        {
+            var itemIds = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId)).Select(bi => bi.Id).ToListAsync(ct);
+            if (itemIds.Count > 0)
+            {
+                var seatScans = await _db.ScanLogs
+                    .Where(s => s.ScannedItemType == ScannedItemType.BookingItem && s.ItemId != null && itemIds.Contains(s.ItemId.Value))
+                    .ToListAsync(ct);
+                if (seatScans.Count > 0) _db.ScanLogs.RemoveRange(seatScans);
+                var items = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId)).ToListAsync(ct);
+                _db.BookingItems.RemoveRange(items);
+            }
+            var bookings = await _db.Bookings.ToListAsync(ct);
+            _db.Bookings.RemoveRange(bookings);
+        }
+
+        var studentPasses = await _db.AdminPasses.Where(p => p.StudentId != null).ToListAsync(ct);
+        if (studentPasses.Count > 0)
+        {
+            var passIds = studentPasses.Select(p => p.Id).ToList();
+            var passScans = await _db.ScanLogs
+                .Where(s => s.ScannedItemType == ScannedItemType.AdminPass && s.ItemId != null && passIds.Contains(s.ItemId.Value))
+                .ToListAsync(ct);
+            if (passScans.Count > 0) _db.ScanLogs.RemoveRange(passScans);
+            _db.AdminPasses.RemoveRange(studentPasses);
+        }
+
+        var resets = await _db.PasswordResets.ToListAsync(ct);
+        if (resets.Count > 0) _db.PasswordResets.RemoveRange(resets);
+
+        var students = await _db.Students.ToListAsync(ct);
+        var count = students.Count;
+        _db.Students.RemoveRange(students);
+
+        await _db.SaveChangesAsync(ct);
+        return count;
+    }
+
+    public async Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(CancellationToken ct = default)
+    {
+        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
+        var eventName = ev?.Name ?? "King Faisal School Event";
+        var students = await _db.Students.Where(s => s.IsActive).ToListAsync(ct);
+        if (students.Count == 0) return new SendWelcomeEmailsResponseDto(0, 0);
+
+        // Reset each student to their initial password so the temp password in the email actually works.
+        var creds = new List<(string Email, string FirstName, string Password)>(students.Count);
+        foreach (var s in students)
+        {
+            var pwd = ComputeInitialPassword(s.FirstName, s.StudentNumber, s.DateOfBirth);
+            s.PasswordHash = _hasher.Hash(pwd);
+            s.MustChangePassword = true;
+            creds.Add((s.Email, s.FirstName, pwd));
+        }
+        await _db.SaveChangesAsync(ct);
+
+        // Load the embedded KFS logo once — referenced inline via cid:kfslogo in every email.
+        var logoPath = Path.Combine(AppContext.BaseDirectory, "Email", "kfs-logo-full.jpg");
+        var logoBytes = File.Exists(logoPath) ? await File.ReadAllBytesAsync(logoPath, ct) : null;
+        var portalUrl = Environment.GetEnvironmentVariable("Email__PortalUrl") ?? "http://localhost:5173";
+
+        // Fire-and-forget background batch so the admin gets an instant response.
+        var sender = _email;
+        var subject = $"{eventName} — Your booking account is ready";
+        _ = Task.Run(async () =>
+        {
+            foreach (var c in creds)
+            {
+                try
+                {
+                    var html = BuildWelcomeHtml(eventName, c.FirstName, c.Email, c.Password, portalUrl, logoBytes != null);
+                    var attachments = logoBytes is null
+                        ? null
+                        : new[] { new EmailAttachment("kfs-logo.jpg", "image/jpeg", logoBytes, "kfslogo") };
+                    await sender.SendAsync(new OutgoingEmail(c.Email, subject, html, attachments), CancellationToken.None);
+                }
+                catch { /* SmtpEmailService logs per-message failures */ }
+            }
+        });
+
+        return new SendWelcomeEmailsResponseDto(students.Count, students.Count);
+    }
+
+    private static string BuildWelcomeHtml(string eventName, string firstName, string email, string pwd, string portalUrl, bool includeLogo)
+    {
+        string E(string s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+        var logoBlock = includeLogo
+            ? "<div style=\"margin-top:32px;padding-top:24px;border-top:1px solid #e5e7eb;text-align:center\">" +
+              "<img src=\"cid:kfslogo\" alt=\"King Faisal School\" style=\"height:60px;width:auto;display:inline-block\" />" +
+              "<div style=\"margin-top:8px;font-size:11px;color:#94a3b8;letter-spacing:0.14em;text-transform:uppercase\">King Faisal School · Cultural Society</div>" +
+              "</div>"
+            : string.Empty;
+
+        return
+            "<!doctype html><html><body style=\"margin:0;padding:0;background:#fbf8f0;font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#14241f\">" +
+            "<div style=\"max-width:560px;margin:0 auto;padding:32px 24px;background:#ffffff\">" +
+              "<div style=\"text-align:center;margin-bottom:6px\">" +
+                "<span style=\"display:inline-block;font-size:11px;letter-spacing:0.28em;text-transform:uppercase;color:#a08b16;font-weight:700\">KFS Booking</span>" +
+              "</div>" +
+              $"<h1 style=\"margin:6px 0 4px;color:#0d3128;font-weight:600;font-size:24px;text-align:center;letter-spacing:-0.01em\">{E(eventName)}</h1>" +
+              "<p style=\"text-align:center;color:#4a5a55;margin:0 0 26px;font-size:14px\">Your booking account is ready.</p>" +
+
+              $"<p style=\"font-size:15px;line-height:1.6\">Hello <strong>{E(firstName)}</strong>,</p>" +
+              $"<p style=\"font-size:14.5px;line-height:1.6;color:#4a5a55\">Your account on the {E(eventName)} parent-booking portal has been created. Use the credentials below to sign in and reserve your seats.</p>" +
+
+              "<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:separate;background:#f1ebda;border-radius:6px;margin:18px 0;font-size:14px\">" +
+                "<tr><td style=\"padding:12px 18px;color:#4a5a55\">Email</td>" +
+                $"<td style=\"padding:12px 18px;text-align:right;font-weight:600;color:#0d3128\">{E(email)}</td></tr>" +
+                "<tr><td style=\"padding:12px 18px;color:#4a5a55;border-top:1px solid #e6dec3\">Temporary password</td>" +
+                $"<td style=\"padding:12px 18px;text-align:right;font-family:'Courier New',monospace;font-weight:700;color:#0d3128;border-top:1px solid #e6dec3\">{E(pwd)}</td></tr>" +
+              "</table>" +
+
+              "<p style=\"font-size:14.5px;color:#0d3128;margin:18px 0 6px;font-weight:600\">What to do next</p>" +
+              "<ol style=\"font-size:14px;color:#4a5a55;line-height:1.7;padding-left:22px;margin:0 0 18px\">" +
+                "<li>Open the portal and sign in with the email and temporary password above.</li>" +
+                "<li>You'll be asked to <strong style=\"color:#0d3128\">set a new password</strong> — choose something only you know.</li>" +
+                "<li>Pick your <strong style=\"color:#0d3128\">VIP seat</strong> — the system automatically pairs the mother and father seats.</li>" +
+                "<li>Optionally, book the <strong style=\"color:#0d3128\">Guest ticket</strong> (one QR admits three) for extended family.</li>" +
+              "</ol>" +
+
+              "<div style=\"text-align:center;margin:28px 0 14px\">" +
+                $"<a href=\"{E(portalUrl)}\" style=\"display:inline-block;background:#0d3128;color:#f6f1e3;padding:13px 30px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;letter-spacing:0.08em\">Open the booking portal</a>" +
+              "</div>" +
+              $"<p style=\"text-align:center;font-size:12px;color:#94a3b8;margin:0 0 6px\">or paste this link: {E(portalUrl)}</p>" +
+
+              "<p style=\"font-size:12px;color:#94a3b8;line-height:1.5;margin-top:22px\">If you didn't expect this email, please contact the school office.</p>" +
+              logoBlock +
+            "</div></body></html>";
+    }
+
+    /// <summary>
+    /// Initial / "reset" password. Prefers the school StudentNumber for new rosters (e.g. "Ahm437079");
+    /// falls back to the old date-of-birth recipe for legacy data. Always deterministic.
+    /// </summary>
+    public static string ComputeInitialPassword(string firstName, string? studentNumber, DateTime? dob)
     {
         var trimmed = (firstName ?? string.Empty).Trim();
         var prefix = trimmed.Length >= 3 ? trimmed[..3] : trimmed.PadRight(3, 'X');
-        // Capitalize the leading character so we always have at least one upper-case letter.
         prefix = char.ToUpperInvariant(prefix[0]) + prefix[1..].ToLowerInvariant();
-        return $"{prefix}{dob:ddMMyyyy}";
+
+        if (!string.IsNullOrWhiteSpace(studentNumber))
+            return $"{prefix}{studentNumber.Trim()}";
+        if (dob.HasValue)
+            return $"{prefix}{dob.Value:ddMMyyyy}";
+        // No StudentNumber and no DOB — admin would have to set a password manually.
+        return $"{prefix}000000";
     }
 }

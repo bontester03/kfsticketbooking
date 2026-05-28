@@ -21,4 +21,7 @@ public record AuthResponse(
     UserType UserType,
     string Email,
     string DisplayName,
-    bool MustChangePassword);
+    bool MustChangePassword,
+    /// <summary>For students: the VIP group the school assigned them in the roster
+    /// (1 = VIP A, 2 = VIP B). Null when not yet assigned or for admins.</summary>
+    int? AssignedGroup = null);

@@ -23,6 +23,9 @@ importers:
       '@fontsource/ibm-plex-sans-arabic':
         specifier: ^5.0.21
         version: 5.2.9
+      '@hookform/resolvers':
+        specifier: ^3.9.0
+        version: 3.10.0(react-hook-form@7.75.0(react@18.3.1))
       '@kfs/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
@@ -41,18 +44,39 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.51.15
         version: 5.100.9(react@18.3.1)
+      axios:
+        specifier: ^1.7.2
+        version: 1.16.0
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      i18next:
+        specifier: ^23.12.2
+        version: 23.16.8
       react:
         specifier: ^18.3.1
         version: 18.3.1
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      react-hook-form:
+        specifier: ^7.52.1
+        version: 7.75.0(react@18.3.1)
+      react-i18next:
+        specifier: ^15.0.0
+        version: 15.7.4(i18next@23.16.8)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(typescript@5.9.3)
       react-router-dom:
         specifier: ^6.26.2
         version: 6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       sonner:
         specifier: ^1.5.0
         version: 1.7.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+      zustand:
+        specifier: ^4.5.4
+        version: 4.5.7(@types/react@18.3.28)(react@18.3.1)
     devDependencies:
       '@types/node':
         specifier: ^20.14.10

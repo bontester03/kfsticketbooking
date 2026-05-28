@@ -131,7 +131,7 @@ public static class DbSeeder
             foreach (var (first, last, dob) in samples)
             {
                 var email = $"{first.ToLowerInvariant()}.{last.ToLowerInvariant()}@stu.kfs.sch.sa";
-                var pwd = StudentService.ComputeInitialPassword(first, dob);
+                var pwd = StudentService.ComputeInitialPassword(first, studentNumber: null, dob);
                 db.Students.Add(new Student
                 {
                     Email = email, FirstName = first, LastName = last, DateOfBirth = dob,

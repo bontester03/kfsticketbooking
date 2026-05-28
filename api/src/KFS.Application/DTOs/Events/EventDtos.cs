@@ -15,6 +15,17 @@ public record EventDto(
     string? ReminderNoteFromAdmin,
     string ScannerToken);
 
+// Safe, aggregate event info for the pre-auth landing/sign-in banner. No PII.
+public record PublicEventDto(
+    string Name,
+    DateTime EventDate,
+    string Venue,
+    string VenueAddress,
+    DateTime BookingOpensAt,
+    DateTime BookingClosesAt,
+    int SeatsTotal,
+    int SeatsRemaining);
+
 public record UpdateEventRequest(
     string Name,
     DateTime EventDate,

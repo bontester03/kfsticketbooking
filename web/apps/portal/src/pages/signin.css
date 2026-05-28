@@ -1,0 +1,245 @@
+/* Two-panel Annual Function sign-in, ported from the approved HTML design.
+   Everything is scoped under .kfs-signin so generic selectors (form/input/.row/.field)
+   don't leak into the rest of the portal. Arabic falls back to IBM Plex Sans Arabic
+   (already bundled) since Tajawal isn't installed. */
+
+.kfs-signin {
+  --teal-900: #0d3a31;
+  --teal:     #124D41;
+  --teal-700: #1c5f53;
+  --sage:     #4FA09B;
+  --sage-200: #c6dedb;
+  --gold:     #AE993A;
+  --gold-200: #e6d99a;
+  --cream:    #f6f1e3;
+  --paper:    #fbf8f0;
+  --ink:      #14241f;
+  --ink-soft: #4a5a55;
+  --rule:     #d8d3c4;
+  --field:    #f1ebda;
+
+  --latin: "Source Sans 3", system-ui, sans-serif;
+  --arabic: "IBM Plex Sans Arabic", "Source Sans 3", system-ui, sans-serif;
+
+  font-family: var(--latin);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+
+  /* Lock to the viewport — the home page must not scroll. */
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.kfs-signin button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+.kfs-signin a { color: inherit; }
+.kfs-signin input { font: inherit; color: inherit; }
+
+.kfs-signin .page {
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  overflow: hidden;
+}
+
+/* ─────── LEFT · BANNER ─────── */
+.kfs-signin .banner {
+  position: relative;
+  background: var(--teal);
+  color: var(--cream);
+  padding: clamp(24px, 3vw, 44px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+}
+.kfs-signin .banner::before {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 25% 28%, rgba(79,160,155,0.28) 0%, rgba(79,160,155,0) 55%),
+    repeating-linear-gradient(120deg, rgba(255,255,255,0.022) 0 8px, rgba(0,0,0,0) 8px 16px);
+  z-index: -2;
+}
+.kfs-signin .banner::after {
+  content: "";
+  position: absolute; inset: 18px;
+  border: 1px solid rgba(174,153,58,0.55);
+  pointer-events: none;
+  z-index: -1;
+}
+.kfs-signin .corners { position: absolute; inset: 14px; pointer-events: none; z-index: -1; }
+.kfs-signin .corners i { position: absolute; width: 18px; height: 18px; border: 1.5px solid var(--gold); }
+.kfs-signin .corners i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.kfs-signin .corners i:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.kfs-signin .corners i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.kfs-signin .corners i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+
+.kfs-signin .banner-top { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.kfs-signin .logo-block { display: flex; align-items: center; gap: 16px; }
+.kfs-signin .logo-block img {
+  /* Original full-colour logo on a small cream card so it reads on the dark banner.
+     The previous brightness(0)+invert(1) recolour didn't work because the JPG has no alpha
+     channel — it produced a solid white rectangle instead of a white silhouette. */
+  height: 56px; width: auto;
+  background: #f6f1e3;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+}
+.kfs-signin .arabic-line {
+  font-family: var(--arabic);
+  font-size: 13px;
+  color: var(--gold-200);
+  text-align: right; line-height: 1.5; direction: rtl;
+}
+.kfs-signin .arabic-line strong { display: block; font-weight: 700; color: var(--cream); font-size: 15px; margin-bottom: 2px; }
+
+.kfs-signin .banner-body { margin-top: auto; margin-bottom: auto; max-width: 580px; padding: clamp(8px, 2vh, 24px) 0; }
+.kfs-signin .eyebrow {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: clamp(10px, 2vh, 22px);
+}
+.kfs-signin .eyebrow .pip { width: 28px; height: 1px; background: var(--gold); }
+
+.kfs-signin .banner h1 {
+  font-family: var(--latin);
+  font-weight: 300;
+  font-size: clamp(36px, 4.6vw, 68px);
+  line-height: 0.98; letter-spacing: -0.02em; color: var(--cream);
+}
+.kfs-signin .banner h1 em { font-style: italic; font-weight: 400; color: var(--gold); }
+.kfs-signin .banner h1 .amp { font-style: italic; font-weight: 300; color: var(--sage); }
+
+.kfs-signin .banner-ar {
+  font-family: var(--arabic); direction: rtl; text-align: right;
+  font-weight: 400; font-size: clamp(18px, 1.6vw, 26px); line-height: 1.35;
+  margin-top: clamp(8px, 1.4vh, 18px); color: rgba(255,255,255,0.78);
+}
+.kfs-signin .banner-ar em { font-style: normal; color: var(--gold); font-weight: 500; }
+
+.kfs-signin .banner-tag {
+  margin-top: clamp(10px, 1.6vh, 20px); font-size: clamp(14px, 1vw, 16px); line-height: 1.5;
+  color: rgba(255,255,255,0.72); max-width: 44ch;
+}
+
+.kfs-signin .meta {
+  margin-top: clamp(14px, 2.2vh, 28px); display: grid; grid-template-columns: repeat(3, minmax(0,1fr));
+  border-top: 1px solid rgba(174,153,58,0.38); border-bottom: 1px solid rgba(174,153,58,0.38);
+}
+.kfs-signin .meta > div { padding: clamp(10px, 1.6vh, 16px) 18px clamp(10px, 1.6vh, 16px) 0; border-right: 1px solid rgba(174,153,58,0.22); }
+.kfs-signin .meta > div + div { padding-left: 18px; }
+.kfs-signin .meta > div:last-child { border-right: 0; }
+.kfs-signin .meta .lbl { font-size: 10px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
+.kfs-signin .meta .val { font-weight: 500; font-size: 17px; line-height: 1.2; color: var(--cream); }
+.kfs-signin .meta .val small { display: block; font-weight: 400; font-size: 12px; color: rgba(255,255,255,0.55); margin-top: 3px; }
+
+.kfs-signin .program { margin-top: clamp(12px, 1.8vh, 24px); display: flex; flex-wrap: wrap; gap: 7px 9px; }
+.kfs-signin .program span {
+  font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: rgba(255,255,255,0.78);
+  padding: 5px 11px; border: 1px solid rgba(174,153,58,0.4); border-radius: 999px; background: rgba(255,255,255,0.02);
+}
+.kfs-signin .program span em { font-style: normal; color: var(--gold); margin-right: 6px; font-weight: 600; }
+
+.kfs-signin .banner-foot {
+  margin-top: clamp(14px, 2vh, 28px);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11.5px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+.kfs-signin .banner-foot .seats { display: inline-flex; align-items: center; gap: 10px; }
+.kfs-signin .banner-foot .seats strong { color: var(--gold); font-weight: 600; font-size: 13px; letter-spacing: 0.06em; }
+.kfs-signin .banner-foot .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--sage);
+  box-shadow: 0 0 12px var(--sage); animation: kfs-pulse 1.8s ease-in-out infinite;
+}
+@keyframes kfs-pulse { 0%,100% { opacity: 0.4; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1); } }
+
+/* ─────── RIGHT · CONSOLE ─────── */
+.kfs-signin .console { background: var(--paper); position: relative; padding: clamp(24px, 3vw, 48px); display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.kfs-signin .console-top { display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; color: var(--ink-soft); }
+.kfs-signin .console-top a.in { color: var(--teal); border-bottom: 1px solid var(--teal); padding-bottom: 1px; text-decoration: none; font-weight: 500; }
+.kfs-signin .console-top a.in:hover { color: var(--gold); border-bottom-color: var(--gold); }
+.kfs-signin .console-top .help { display: inline-flex; align-items: center; gap: 8px; }
+.kfs-signin .console-top .help::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--sage); }
+
+.kfs-signin .console-body { margin: auto; width: 100%; max-width: 420px; padding: clamp(12px, 2vh, 32px) 0; }
+.kfs-signin .console-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.24em; text-transform: uppercase; color: var(--teal); margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.kfs-signin .console-eyebrow::before { content: ""; width: 20px; height: 1px; background: var(--gold); }
+
+.kfs-signin .console h1 { font-weight: 600; font-size: clamp(30px, 3vw, 40px); line-height: 1.1; letter-spacing: -0.015em; color: var(--teal); }
+.kfs-signin .console h1 em { font-style: italic; color: var(--gold); font-weight: 600; }
+.kfs-signin .console-sub { margin-top: 12px; font-size: 15px; line-height: 1.6; color: var(--ink-soft); max-width: 38ch; }
+
+.kfs-signin form { margin-top: clamp(18px, 3vh, 32px); display: flex; flex-direction: column; gap: 16px; }
+.kfs-signin .field { display: flex; flex-direction: column; gap: 8px; }
+.kfs-signin .field label { font-size: 11px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft); }
+.kfs-signin .input {
+  position: relative; display: flex; align-items: center;
+  border: 1px solid var(--rule); background: var(--field);
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.kfs-signin .input:focus-within { border-color: var(--teal); background: #fff; box-shadow: 0 0 0 3px rgba(18,77,65,0.10); }
+.kfs-signin .input svg { width: 16px; height: 16px; margin-left: 14px; color: var(--teal); flex-shrink: 0; }
+.kfs-signin .input input { flex: 1; padding: 14px 16px; background: transparent; border: 0; outline: 0; font-size: 15px; color: var(--ink); }
+.kfs-signin .input input::placeholder { color: #9aa19c; }
+.kfs-signin .input .toggle { padding: 0 14px; font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-soft); }
+.kfs-signin .input .toggle:hover { color: var(--teal); }
+
+.kfs-signin .row { display: flex; align-items: center; justify-content: space-between; font-size: 13.5px; color: var(--ink-soft); }
+.kfs-signin .check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.kfs-signin .check input { accent-color: var(--teal); width: 14px; height: 14px; }
+.kfs-signin .row a.fp { color: var(--teal); text-decoration: none; border-bottom: 1px solid var(--teal); padding-bottom: 1px; font-weight: 500; }
+.kfs-signin .row a.fp:hover { color: var(--gold); border-bottom-color: var(--gold); }
+
+.kfs-signin .signin {
+  margin-top: 4px; padding: 16px 22px; background: var(--teal); color: var(--cream);
+  font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  display: flex; align-items: center; justify-content: space-between;
+  transition: background .2s ease, transform .15s ease;
+}
+.kfs-signin .signin:hover { background: var(--teal-900); }
+.kfs-signin .signin:active { transform: translateY(1px); }
+.kfs-signin .signin:disabled { opacity: .65; cursor: default; }
+.kfs-signin .signin svg { width: 14px; height: 14px; }
+
+.kfs-signin .divider { display: flex; align-items: center; gap: 14px; margin: 28px 0 22px; font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft); }
+.kfs-signin .divider::before, .kfs-signin .divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+.kfs-signin .alt { display: flex; flex-direction: column; gap: 10px; }
+.kfs-signin .alt button { padding: 14px 18px; border: 1px solid var(--rule); background: var(--paper); font-size: 14px; color: var(--ink); display: flex; align-items: center; justify-content: center; gap: 12px; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.kfs-signin .alt button:hover { border-color: var(--teal); color: var(--teal); background: #fff; }
+.kfs-signin .alt button strong { font-weight: 600; }
+.kfs-signin .alt .guest { border-style: dashed; color: var(--ink-soft); }
+.kfs-signin .alt .guest:hover { color: var(--teal); }
+
+.kfs-signin .signup { margin-top: 28px; text-align: center; font-size: 13.5px; color: var(--ink-soft); }
+.kfs-signin .signup a { color: var(--teal); border-bottom: 1px solid var(--teal); padding-bottom: 1px; text-decoration: none; font-weight: 500; }
+.kfs-signin .signup a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+
+.kfs-signin .console-bottom { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-soft); }
+.kfs-signin .console-bottom .legal a { color: var(--ink-soft); text-decoration: none; margin-left: 18px; }
+.kfs-signin .console-bottom .legal a:hover { color: var(--teal); }
+
+/* ─────── responsive ─────── */
+@media (max-width: 920px) {
+  /* Stacked layout can't fit two full panels in one viewport — allow scrolling here only. */
+  .kfs-signin { height: auto; min-height: 100dvh; overflow: visible; }
+  .kfs-signin .page { grid-template-columns: 1fr; height: auto; min-height: 100dvh; overflow: visible; }
+  .kfs-signin .banner { height: auto; min-height: 60vh; }
+  .kfs-signin .console { height: auto; }
+  .kfs-signin .meta { grid-template-columns: 1fr 1fr; }
+  .kfs-signin .meta > div:nth-child(2) { border-right: 0; }
+  .kfs-signin .meta > div:nth-child(3) { grid-column: 1 / -1; padding-left: 0; padding-top: 16px; border-top: 1px solid rgba(174,153,58,0.22); }
+}
+@media (max-width: 540px) {
+  .kfs-signin .meta { grid-template-columns: 1fr; }
+  .kfs-signin .meta > div { border-right: 0; padding-left: 0 !important; }
+  .kfs-signin .meta > div + div { border-top: 1px solid rgba(174,153,58,0.22); padding-top: 16px; }
+  .kfs-signin .banner-top { flex-direction: column; align-items: flex-start; }
+  .kfs-signin .arabic-line { text-align: left; direction: rtl; align-self: flex-end; }
+  .kfs-signin .banner-foot { flex-direction: column; align-items: flex-start; gap: 14px; }
+}

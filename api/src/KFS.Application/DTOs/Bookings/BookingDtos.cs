@@ -15,7 +15,9 @@ public record BookingItemDto(
     string TicketNumber,
     string? QrCodeImageUrl,
     bool EmailSent,
-    DateTime HoldExpiresAt);
+    DateTime HoldExpiresAt,
+    bool Scanned = false,
+    DateTime? ScannedAt = null);
 
 public record BookingDto(
     Guid Id,

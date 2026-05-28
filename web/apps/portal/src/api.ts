@@ -5,5 +5,6 @@ export const api = {
   auth:     endpoints.auth(http),
   events:   endpoints.events(http),
   cart:     endpoints.cart(http),
-  bookings: endpoints.bookings(http)
+  bookings: endpoints.bookings(http),
+  guest:    endpoints.guest(http)
 };

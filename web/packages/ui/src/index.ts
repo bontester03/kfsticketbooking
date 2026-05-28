@@ -8,4 +8,5 @@ export * from './components/CountdownPill';
 export * from './components/KfsLogo';
 export * from './components/SeatGrid';
 export * from './components/TicketCard';
+export * from './components/PassTicketCard';
 export * from './components/VenueMap';

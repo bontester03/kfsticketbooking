@@ -67,13 +67,17 @@ export function TicketCard({ item, studentName, studentEmail, parentLabel, group
         <ClockIcon />
         <p className="ticket-receipt-line">Ticket is sent to</p>
         <p className="ticket-email">{studentEmail}</p>
-        <p className="ticket-receipt-line">and pending approval<br />by receiver</p>
 
         <p className="ticket-qr-label">QR Code:</p>
         {item.qrCodeImageUrl ? (
           <img alt={`QR ${item.ticketNumber}`} src={item.qrCodeImageUrl} className="ticket-qr" />
         ) : (
           <div className="ticket-qr ticket-qr-missing">QR pending</div>
+        )}
+        {item.scanned && (
+          <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">
+            ✓ Scanned at the gate
+          </p>
         )}
       </section>
     </div>

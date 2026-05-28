@@ -54,6 +54,18 @@ services:
       Qr__Issuer: ${QR_ISSUER:-kfs-qr}
       Qr__SigningKey: ${QR_SIGNING_KEY:-please-change-this-separately-from-jwt-secret}
       Auth__SuperAdminPassword: ${SUPER_ADMIN_PASSWORD:-Admin@123}
+      # Email — set EMAIL_* in .env (gitignored) to send real mail via Microsoft 365.
+      # Defaults to Console (writes .html to /app/logs/email) so nothing sends if unset.
+      Email__Provider: ${EMAIL_PROVIDER:-Console}
+      Email__Host: ${EMAIL_HOST:-smtp.office365.com}
+      Email__Port: ${EMAIL_PORT:-587}
+      Email__Username: ${EMAIL_USERNAME:-}
+      Email__Password: ${EMAIL_PASSWORD:-}
+      Email__FromAddress: ${EMAIL_FROM:-}
+      Email__FromName: ${EMAIL_FROM_NAME:-King Faisal School}
+      Email__PortalUrl: ${EMAIL_PORTAL_URL:-http://localhost:5173}
+      # DEV ONLY: accept the corporate proxy's intercepting TLS cert on SMTP. Leave false in prod.
+      Email__AcceptInvalidCert: ${EMAIL_ACCEPT_INVALID_CERT:-false}
       Cors__AllowedOrigins__0: ${WEB_PORTAL_ORIGIN:-http://localhost:5173}
       Cors__AllowedOrigins__1: ${WEB_ADMIN_ORIGIN:-http://localhost:5174}
       Cors__AllowedOrigins__2: ${WEB_SCANNER_ORIGIN:-http://localhost:5175}

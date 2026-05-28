@@ -1,15 +1,20 @@
 using ClosedXML.Excel;
 using KFS.Application.Interfaces;
+using KFS.Domain.Enums;
 
 namespace KFS.Infrastructure.Excel;
 
 public class ExcelStudentImporter : IExcelStudentImporter
 {
+    // School roster columns (post-2026 layout):
+    //   1: Student ID         2: First Name      3: Last Name        4: Preferred Name
+    //   5: Email              6: Gender          7: Grade            8: Group ("VIP A" / "VIP B")
+    // First row is a header and is skipped.
     public ExcelParseResult Parse(Stream xlsxStream)
     {
         using var wb = new XLWorkbook(xlsxStream);
         var ws = wb.Worksheets.First();
-        var rows = ws.RowsUsed().Skip(1).ToList(); // assume header row
+        var rows = ws.RowsUsed().Skip(1).ToList();
 
         var valid = new List<ParsedStudentRow>();
         var errors = new List<StudentRowError>();
@@ -17,47 +22,42 @@ public class ExcelStudentImporter : IExcelStudentImporter
         foreach (var row in rows)
         {
             var rn = row.RowNumber();
-            var email = row.Cell(1).GetString().Trim();
-            var first = row.Cell(2).GetString().Trim();
-            var last = row.Cell(3).GetString().Trim();
-            var dobRaw = row.Cell(4).GetString().Trim();
-            var grade = row.Cell(5).GetString().Trim();
+            var studentId = row.Cell(1).GetString().Trim();
+            var first     = row.Cell(2).GetString().Trim();
+            var last      = row.Cell(3).GetString().Trim();
+            var preferred = row.Cell(4).GetString().Trim();
+            var email     = row.Cell(5).GetString().Trim();
+            var gender    = row.Cell(6).GetString().Trim();
+            var grade     = row.Cell(7).GetString().Trim();
+            var groupRaw  = row.Cell(8).GetString().Trim();
 
             if (string.IsNullOrEmpty(email)) { errors.Add(new(rn, "Email", "Required")); continue; }
+            if (!email.Contains('@'))         { errors.Add(new(rn, "Email", "Malformed email")); continue; }
             if (string.IsNullOrEmpty(first)) { errors.Add(new(rn, "FirstName", "Required")); continue; }
-            if (string.IsNullOrEmpty(last))  { errors.Add(new(rn, "LastName",  "Required")); continue; }
-            if (string.IsNullOrEmpty(dobRaw)) { errors.Add(new(rn, "DateOfBirth", "Required")); continue; }
-            if (!email.Contains('@')) { errors.Add(new(rn, "Email", "Malformed email")); continue; }
+            if (string.IsNullOrEmpty(last))  { errors.Add(new(rn, "LastName", "Required")); continue; }
 
-            if (!TryParseDob(dobRaw, out var dob))
+            ZoneGroup? group = null;
+            if (!string.IsNullOrEmpty(groupRaw))
             {
-                errors.Add(new(rn, "DateOfBirth", "Use DD-MM-YYYY (e.g. 15-03-2010)"));
-                continue;
+                var g = groupRaw.ToUpperInvariant().Replace(" ", "").Replace("-", "");
+                if (g is "VIPA" or "A")      group = ZoneGroup.A;
+                else if (g is "VIPB" or "B") group = ZoneGroup.B;
+                else { errors.Add(new(rn, "Group", "Must be 'VIP A' or 'VIP B'.")); continue; }
             }
 
-            valid.Add(new ParsedStudentRow(rn, email, first, last, dob,
-                string.IsNullOrEmpty(grade) ? null : grade));
+            valid.Add(new ParsedStudentRow(
+                RowNumber: rn,
+                Email: email,
+                FirstName: first,
+                LastName: last,
+                StudentNumber: string.IsNullOrEmpty(studentId) ? null : studentId,
+                PreferredName: string.IsNullOrEmpty(preferred) ? null : preferred,
+                Gender: string.IsNullOrEmpty(gender) ? null : gender,
+                GradeOrClass: string.IsNullOrEmpty(grade) ? null : grade,
+                AssignedGroup: group,
+                DateOfBirth: null));
         }
 
         return new ExcelParseResult(valid, errors);
-    }
-
-    private static bool TryParseDob(string raw, out DateTime dob)
-    {
-        // Accept DD-MM-YYYY, DD/MM/YYYY, or Excel-numeric (already coerced to string by GetString()).
-        var formats = new[] { "dd-MM-yyyy", "dd/MM/yyyy", "d-M-yyyy", "d/M/yyyy", "yyyy-MM-dd" };
-        if (DateTime.TryParseExact(raw, formats, System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
-            out dob))
-            return true;
-
-        if (double.TryParse(raw, out var oa))
-        {
-            try { dob = DateTime.FromOADate(oa).Date; return true; }
-            catch { }
-        }
-
-        dob = default;
-        return false;
     }
 }

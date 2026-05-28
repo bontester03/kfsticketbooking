@@ -68,6 +68,10 @@ export default function MyBookingsPage() {
 
       <Card>
         <div className="flex flex-wrap gap-3">
+          <Button variant="accent" onClick={() => api.bookings.downloadAllPdf()
+            .catch((e: { message?: string }) => toast.error(e?.message ?? 'Download failed.'))}>
+            Download tickets PDF
+          </Button>
           <Button variant="secondary" onClick={() => resend.mutate(confirmed.id)} loading={resend.isPending}>
             {t('myBookings.resendEmails')}
           </Button>
