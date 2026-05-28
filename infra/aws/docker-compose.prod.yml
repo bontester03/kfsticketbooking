@@ -1,0 +1,68 @@
+# Production overlay for AWS EC2 deploy.
+#
+# Used together with the base docker-compose.yml at the repo root:
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f infra/aws/docker-compose.prod.yml \
+#     up -d --build
+#
+# Differences vs the dev compose:
+#   - Adds a Caddy reverse proxy that terminates TLS (Let's Encrypt) and routes
+#     parents/admins/gate-staff to the right SPA container by hostname.
+#   - Drops Azurite. Blob storage switches to local-disk (served by the API at
+#     /static/...). Survives container restarts because /app/wwwroot is a volume.
+#   - Removes the host-port mappings for portal/admin/scanner/api — they're
+#     only reachable through Caddy on 80/443.
+#   - Tells the API to look at the public domain when re-signing blob URLs.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: kfs-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [kfs]
+    depends_on: [portal, admin, scanner, api]
+
+  # ----- Override the base services -----
+
+  api:
+    environment:
+      # Use the API's own static-file middleware to serve QR / printable blobs.
+      Storage__Provider: LocalDisk
+      Storage__PublicBaseUrl: https://${KFS_HOST_PORTAL}
+      # Use the parent / admin / scanner domains as CORS allowed origins.
+      Cors__AllowedOrigins__0: https://${KFS_HOST_PORTAL}
+      Cors__AllowedOrigins__1: https://${KFS_HOST_ADMIN}
+      Cors__AllowedOrigins__2: https://${KFS_HOST_SCANNER}
+      Swagger__Enabled: ${SWAGGER_ENABLED:-false}
+      # SMTP works on AWS the same way it does locally; just don't enable the
+      # cert-bypass flag — Azure / AWS have direct TLS to Gmail.
+      Email__AcceptInvalidCert: "false"
+    ports: !reset []   # no public port — Caddy fronts everything
+
+  portal:
+    ports: !reset []
+  admin:
+    ports: !reset []
+  scanner:
+    ports: !reset []
+
+  # Azurite isn't used in prod (LocalDisk blob). Stopped + removed.
+  azurite:
+    profiles: ["disabled"]
+
+  postgres:
+    # Keep the dev defaults but you can change to a smaller / larger instance.
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

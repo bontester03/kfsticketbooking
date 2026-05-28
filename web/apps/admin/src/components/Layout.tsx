@@ -28,7 +28,7 @@ export function Layout() {
   return (
     <div className="min-h-screen flex flex-col bg-kfs-forest-50/30">
       <header className="border-b border-kfs-sage-100 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+        <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
             <KfsLogo href="/" />
             <span className="hidden text-xs font-semibold uppercase tracking-wider text-kfs-sage-700 sm:inline">
@@ -40,7 +40,7 @@ export function Layout() {
             <Button variant="secondary" onClick={onLogout}>Sign out</Button>
           </div>
         </div>
-        <nav className="mx-auto flex max-w-6xl flex-wrap gap-1 px-4 pb-2">
+        <nav className="mx-auto flex max-w-screen-2xl flex-wrap gap-1 px-4 pb-2">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => navCls(isActive)}>
               {n.label}
@@ -48,7 +48,7 @@ export function Layout() {
           ))}
         </nav>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-6">
         <Outlet />
       </main>
     </div>

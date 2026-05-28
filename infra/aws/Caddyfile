@@ -1,0 +1,32 @@
+# KFS Booking — Caddy reverse proxy.
+# Caddy auto-acquires + renews Let's Encrypt certs for every host listed below,
+# as long as those hostnames have DNS A records pointing at this EC2's public IP
+# AND ports 80/443 are open in the Security Group.
+#
+# Set KFS_HOST_PORTAL / KFS_HOST_ADMIN / KFS_HOST_SCANNER / ACME_EMAIL in .env;
+# Docker Compose substitutes them when reading this file.
+
+{
+    # Required by Let's Encrypt for renewal notifications.
+    email {$ACME_EMAIL}
+}
+
+# --- Parent / student portal ---------------------------------------------------
+{$KFS_HOST_PORTAL} {
+    encode zstd gzip
+    reverse_proxy portal:80
+    # Same-origin /api and /hubs already proxied by the portal's nginx.conf to api:8080.
+}
+
+# --- Admin console -------------------------------------------------------------
+{$KFS_HOST_ADMIN} {
+    encode zstd gzip
+    reverse_proxy admin:80
+}
+
+# --- Gate scanner --------------------------------------------------------------
+# iPad Safari needs HTTPS for camera access — that's exactly what Caddy gives us.
+{$KFS_HOST_SCANNER} {
+    encode zstd gzip
+    reverse_proxy scanner:80
+}

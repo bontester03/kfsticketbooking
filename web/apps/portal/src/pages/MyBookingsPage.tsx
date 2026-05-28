@@ -51,23 +51,11 @@ export default function MyBookingsPage() {
   const groupLetter: 'A' | 'B' = confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B';
 
   return (
-    <div className="grid gap-6">
-      <h1 className="text-xl font-semibold text-kfs-forest">{t('myBookings.title')}</h1>
-      <div className="grid gap-4">
-        {confirmed.items.map((item) => (
-          <TicketCard
-            key={item.id}
-            item={item}
-            studentName={displayName}
-            studentEmail={studentEmail}
-            parentLabel={item.parentRole === 0 ? 'Mother' : 'Father'}
-            group={groupLetter}
-          />
-        ))}
-      </div>
-
-      <Card>
-        <div className="flex flex-wrap gap-3">
+    <div className="flex flex-col gap-3">
+      {/* Heading + action strip on top, then the 2-up compact ticket grid. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold text-kfs-forest">{t('myBookings.title')}</h1>
+        <div className="flex flex-wrap gap-2">
           <Button variant="accent" onClick={() => api.bookings.downloadAllPdf()
             .catch((e: { message?: string }) => toast.error(e?.message ?? 'Download failed.'))}>
             Download tickets PDF
@@ -79,7 +67,29 @@ export default function MyBookingsPage() {
             {t('myBookings.cancel')}
           </Button>
         </div>
-      </Card>
+      </div>
+
+      {/* Compact 2-up tickets: each card half-width on desktop with reduced min-height + smaller QR
+          so both fit without scrolling on a normal viewport. */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2
+                      [&_.ticket]:min-h-[14rem]
+                      [&_.ticket-stub]:p-4 [&_.ticket-stub]:gap-2
+                      [&_.ticket-receipt]:p-4
+                      [&_.ticket-value]:text-lg
+                      [&_.ticket-category]:h-10 [&_.ticket-category]:w-12 [&_.ticket-category]:text-xl
+                      [&_.ticket-qr]:h-24 [&_.ticket-qr]:w-24
+                      [&_.ticket-clock]:h-7 [&_.ticket-clock]:w-7">
+        {confirmed.items.map((item) => (
+          <TicketCard
+            key={item.id}
+            item={item}
+            studentName={displayName}
+            studentEmail={studentEmail}
+            parentLabel={item.parentRole === 0 ? 'Mother' : 'Father'}
+            group={groupLetter}
+          />
+        ))}
+      </div>
 
       {confirmCancelId && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4">
