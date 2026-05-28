@@ -2,7 +2,9 @@
 
 A one-evening deploy. The whole stack (API · Postgres · Portal · Admin · Scanner · Caddy reverse proxy with auto-HTTPS) runs on a single EC2 instance. Same `docker-compose` setup you've been using locally, plus a small production overlay (`infra/aws/docker-compose.prod.yml`) and a Caddyfile.
 
-> **Cost estimate** ≈ **$30–40 / month**: `t3.medium` (2 vCPU / 4 GB) ≈ $30 + 30 GB EBS ≈ $3 + Route 53 hosted zone ≈ $0.50. Free tier covers the first 750 hours of a `t2.micro` if you want to test before paying.
+> **Sizing for ~300 simultaneous parents:** `t3.large` (2 vCPU / **8 GB**) is the recommended default — handles the 30-second login burst with sub-2-second response times. Bumping to `t3.xlarge` (4 vCPU / 16 GB) is the bulletproof option for the actual event night (~$120 / mo) — and you can `aws ec2 modify-instance-attribute` it back down to `t3.large` or `t3.medium` after the event (see § 9).
+>
+> **Cost estimate** for `t3.large`: ≈ **$60 / mo** ($55 instance + $3 EBS + Route 53 zone). `t3.medium` (~$30 / mo) is fine for **testing / a smaller event (< 100 parents)** but marginal for 300 simultaneous logins.
 
 ---
 
@@ -55,10 +57,11 @@ aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port
 aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 80  --cidr 0.0.0.0/0
 aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0
 
-# --- launch a t3.medium with 30 GB EBS root volume ---
+# --- launch a t3.large with 30 GB EBS root volume (sized for 300 simultaneous parents) ---
+# Use t3.medium instead for testing / < 100-parent events.
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id $AMI_ID \
-  --instance-type t3.medium \
+  --instance-type t3.large \
   --security-group-ids $SG_ID \
   --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=kfs-booking}]' \

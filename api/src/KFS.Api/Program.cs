@@ -72,6 +72,8 @@ builder.Services.AddCors(options => options.AddPolicy(corsPolicy, p =>
 builder.Services.AddHostedService<CartSweeperJob>();
 builder.Services.AddHostedService<RebookWindowJob>();
 builder.Services.AddHostedService<DayBeforeReminderJob>();
+// Pre-warms BCrypt + EF JIT off the request thread so the first login burst is fast.
+builder.Services.AddHostedService<StartupWarmer>();
 
 var app = builder.Build();
 

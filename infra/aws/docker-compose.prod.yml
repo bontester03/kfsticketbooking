@@ -18,7 +18,8 @@
 
 services:
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: ./caddy   # custom build with the rate-limit module
     container_name: kfs-caddy
     restart: unless-stopped
     ports:
@@ -30,38 +31,57 @@ services:
       - caddy-config:/config
     networks: [kfs]
     depends_on: [portal, admin, scanner, api]
+    # Caddy is lightweight; cap so a runaway log can't starve the API.
+    cpus: 0.5
+    mem_limit: 256m
 
   # ----- Override the base services -----
 
+  # The API is the CPU-hot path (BCrypt on login + JIT). Reserve most of the box for it.
   api:
+    restart: unless-stopped
     environment:
-      # Use the API's own static-file middleware to serve QR / printable blobs.
       Storage__Provider: LocalDisk
       Storage__PublicBaseUrl: https://${KFS_HOST_PORTAL}
-      # Use the parent / admin / scanner domains as CORS allowed origins.
       Cors__AllowedOrigins__0: https://${KFS_HOST_PORTAL}
       Cors__AllowedOrigins__1: https://${KFS_HOST_ADMIN}
       Cors__AllowedOrigins__2: https://${KFS_HOST_SCANNER}
       Swagger__Enabled: ${SWAGGER_ENABLED:-false}
-      # SMTP works on AWS the same way it does locally; just don't enable the
-      # cert-bypass flag — Azure / AWS have direct TLS to Gmail.
+      # SMTP works on AWS the same way it does locally; cert-bypass stays off.
       Email__AcceptInvalidCert: "false"
-    ports: !reset []   # no public port — Caddy fronts everything
+      # Pre-compile + tiered JIT warm-up. Already defaults in .NET 8 but pinned for clarity.
+      DOTNET_TieredPGO: "1"
+      DOTNET_TC_QuickJitForLoops: "1"
+    ports: !reset []
+    # Give the API the lion's share of the box: most of the 2 vCPUs and 2 GB RAM.
+    cpus: 1.6
+    mem_limit: 2g
 
   portal:
+    restart: unless-stopped
     ports: !reset []
+    cpus: 0.25
+    mem_limit: 192m
   admin:
+    restart: unless-stopped
     ports: !reset []
+    cpus: 0.25
+    mem_limit: 192m
   scanner:
+    restart: unless-stopped
     ports: !reset []
+    cpus: 0.25
+    mem_limit: 192m
 
-  # Azurite isn't used in prod (LocalDisk blob). Stopped + removed.
+  # Azurite isn't used in prod (LocalDisk blob).
   azurite:
     profiles: ["disabled"]
 
   postgres:
-    # Keep the dev defaults but you can change to a smaller / larger instance.
     restart: unless-stopped
+    # ~30% of the box for Postgres on t3.large. Bump to 2g/1.5cpus on t3.xlarge.
+    cpus: 1.0
+    mem_limit: 1g
 
 volumes:
   caddy-data:

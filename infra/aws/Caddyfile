@@ -9,13 +9,29 @@
 {
     # Required by Let's Encrypt for renewal notifications.
     email {$ACME_EMAIL}
+    # rate_limit comes from the caddy-ratelimit module bundled by infra/aws/caddy/Dockerfile.
+    order rate_limit before reverse_proxy
 }
 
 # --- Parent / student portal ---------------------------------------------------
 {$KFS_HOST_PORTAL} {
     encode zstd gzip
+
+    # Rate-limit /auth/login bursts: at most 15 attempts per IP per 10 seconds.
+    # 300 distinct students each at 1/sec sail through; one buggy retry loop hits 429.
+    rate_limit {
+        zone login_burst {
+            key    {http.request.remote.host}
+            events 15
+            window 10s
+        }
+        match {
+            method POST
+            path   /api/v1/auth/login
+        }
+    }
+
     reverse_proxy portal:80
-    # Same-origin /api and /hubs already proxied by the portal's nginx.conf to api:8080.
 }
 
 # --- Admin console -------------------------------------------------------------
