@@ -14,10 +14,14 @@ interface TypeMeta {
 
 // Intelligent per-type theming — accent, gate and zone change with the pass type.
 const TYPE_META: Record<AdminPassType, TypeMeta> = {
-  0: { label: 'VVIP',  letter: 'V', gate: 'Gate V', badgeClass: 'ticket-category--vvip',  arabic: 'كبار الشخصيات' },
-  1: { label: 'Guest', letter: 'G', gate: 'Gate G', badgeClass: 'ticket-category--guest', arabic: 'ضيف' },
-  2: { label: 'Staff', letter: 'S', gate: 'Gate S', badgeClass: 'ticket-category--staff', arabic: 'طاقم العمل' },
-  3: { label: 'Media', letter: 'M', gate: 'Gate M', badgeClass: 'ticket-category--media', arabic: 'إعلام' }
+  0: { label: 'VVIP',       letter: 'V', gate: 'Gate V', badgeClass: 'ticket-category--vvip',  arabic: 'كبار الشخصيات' },
+  1: { label: 'Guest',      letter: 'G', gate: 'Gate G', badgeClass: 'ticket-category--guest', arabic: 'ضيف' },
+  2: { label: 'Staff',      letter: 'S', gate: 'Gate S', badgeClass: 'ticket-category--staff', arabic: 'طاقم العمل' },
+  3: { label: 'Media',      letter: 'M', gate: 'Gate M', badgeClass: 'ticket-category--media', arabic: 'إعلام' },
+  4: { label: 'Photographer',     letter: 'P', gate: 'Gate P', badgeClass: 'ticket-category--media', arabic: 'مصور' },
+  5: { label: 'Personal Assistant', letter: 'A', gate: 'Gate A', badgeClass: 'ticket-category--staff', arabic: 'مساعد شخصي' },
+  6: { label: 'Visitor',    letter: 'V', gate: 'Gate V', badgeClass: 'ticket-category--guest', arabic: 'زائر' },
+  7: { label: 'Emergency',  letter: 'E', gate: 'Gate E', badgeClass: 'ticket-category--vvip',  arabic: 'طوارئ' }
 };
 
 /**

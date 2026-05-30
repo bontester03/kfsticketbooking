@@ -5,11 +5,13 @@
 export type UserType = 0 | 1; // 0 Student, 1 Admin
 export type ZoneGroup = 0 | 1 | 2; // None, A, B
 export type ZoneSide = 0 | 1 | 2;  // None, Female, Male
-export type ZoneCode = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ZoneCode = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 export type SeatStatus = 0 | 1 | 2; // Available, Held, Booked
-export type ParentRole = 0 | 1; // Mother, Father
+export type ParentRole = 0 | 1 | 2; // Mother, Father, Grandmother (girls event)
 export type BookingStatus = 0 | 1 | 2 | 3 | 4; // Cart, Confirmed, Cancelled, Expired, RebookWindow
-export type AdminPassType = 0 | 1 | 2 | 3; // VVIP, Guest, Staff, Media
+export type AdminPassType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ZoneVisibility = 0 | 1 | 2; // PublicBookable, AdminOnly, DisplayOnly
+export type EventGender = 1 | 2; // 1 Male/Boys, 2 Female/Girls
 
 export const ZoneGroup = { None: 0, A: 1, B: 2 } as const;
 export const ZoneSide = { None: 0, Female: 1, Male: 2 } as const;
@@ -17,7 +19,9 @@ export const SeatStatus = { Available: 0, Held: 1, Booked: 2 } as const;
 export const BookingStatus = {
   Cart: 0, Confirmed: 1, Cancelled: 2, Expired: 3, RebookWindow: 4
 } as const;
-export const ParentRole = { Mother: 0, Father: 1 } as const;
+export const ParentRole = { Mother: 0, Father: 1, Grandmother: 2 } as const;
+export const ZoneVisibility = { PublicBookable: 0, AdminOnly: 1, DisplayOnly: 2 } as const;
+export const EventGender = { Male: 1, Female: 2 } as const;
 
 export interface AuthResponse {
   accessToken: string;
@@ -36,6 +40,13 @@ export interface AuthResponse {
 export interface EventDto {
   id: string;
   name: string;
+  /** URL-safe identifier — "boys" or "girls". Used in admin routes /admin/{slug}/... */
+  slug: string;
+  gender: EventGender;
+  /** "Father & Mother" (boys) / "Mother & Grandmother" (girls). */
+  pairLabel: string;
+  /** Seats covered by one student-issued Guest QR (boys=3, girls=5). */
+  guestSeatsPerPass: number;
   eventDate: string;
   venue: string;
   venueAddress: string;
@@ -112,7 +123,10 @@ export interface ApiError {
 // ---- Admin DTOs (mirror api/src/KFS.Application/DTOs/*) -----------------------------------------
 
 // `AdminPassType` type alias is declared near the top of this file; here we add the value object.
-export const AdminPassType = { VVIP: 0, Guest: 1, Staff: 2, Media: 3 } as const;
+export const AdminPassType = {
+  VVIP: 0, Guest: 1, Staff: 2, Media: 3,
+  Photographer: 4, PersonalAssistant: 5, Visitor: 6, Emergency: 7
+} as const;
 
 export type PassOutputFormat = 0 | 1; // Pdf, Zip
 export const PassOutputFormat = { Pdf: 0, Zip: 1 } as const;
@@ -174,9 +188,16 @@ export interface DashboardStatsDto {
 }
 
 export interface GeneratePassesRequest {
+  eventId: string;
   type: AdminPassType;
   count: number;
   format: PassOutputFormat;
+}
+
+export interface SetPassQuotaRequest {
+  eventId: string;
+  type: AdminPassType;
+  capacity: number;
 }
 
 export interface GeneratePassesResponse {
@@ -285,6 +306,8 @@ export interface PassBatchSummaryDto {
 
 export interface PublicEventDto {
   name: string;
+  slug: string;
+  gender: EventGender;
   eventDate: string;
   venue: string;
   venueAddress: string;

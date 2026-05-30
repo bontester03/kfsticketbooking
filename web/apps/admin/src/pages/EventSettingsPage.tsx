@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button, Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ApiError, EventDto, UpdateEventRequest } from '@kfs/types';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 // <input type="datetime-local"> wants "yyyy-MM-ddTHH:mm" in local wall-clock time.
 function toLocalInput(iso: string): string {
@@ -37,7 +38,15 @@ function toForm(e: EventDto): FormState {
 
 export default function EventSettingsPage() {
   const qc = useQueryClient();
-  const eventQ = useQuery({ queryKey: ['admin', 'event'], queryFn: () => api.admin.event.get() });
+  // Resolve the current event from the EventContext (set by the picker / layout).
+  // We use getById here rather than getBySlug to keep the query key tied to the
+  // already-resolved id so cache invalidation lines up with save mutations.
+  const eventId = useEventContext((s) => s.eventId);
+  const eventQ = useQuery({
+    queryKey: ['admin', 'event', eventId],
+    queryFn: () => api.admin.event.get(eventId!),
+    enabled: !!eventId
+  });
   const [form, setForm] = useState<FormState | null>(null);
 
   useEffect(() => {

@@ -36,12 +36,16 @@ export const endpoints = {
   }),
 
   events: (c: AxiosInstance) => ({
+    // Student-context: returns the signed-in student's event (scoped by JWT "eid" claim).
     active: () => c.get<EventDto>('/events/active').then(r => r.data),
     seatMap: (eventId: string, group: ZoneGroup) =>
       c.get<SeatMapDto>(`/events/${eventId}/seatmap`, { params: { group } }).then(r => r.data),
-    // Pre-auth: safe aggregate info for the public landing banner. 204 → null when no event.
+    // Pre-auth: legacy "first event" summary — kept for the existing landing banners.
     publicSummary: () =>
-      c.get<PublicEventDto | null>('/public/event').then(r => r.status === 204 ? null : (r.data ?? null))
+      c.get<PublicEventDto | null>('/public/event').then(r => r.status === 204 ? null : (r.data ?? null)),
+    // Pre-auth: both events (Boys + Girls) for the multi-event landing page.
+    publicList: () =>
+      c.get<PublicEventDto[]>('/public/events').then(r => r.data)
   }),
 
   cart: (c: AxiosInstance) => ({
@@ -116,7 +120,9 @@ export const endpoints = {
     },
 
     passes: {
-      generate: (req: GeneratePassesRequest) =>
+      // `eventId` on the body is auto-injected by the admin app's axios interceptor —
+      // callers can still pass `{ type, count, format }` and the interceptor adds eventId.
+      generate: (req: Omit<GeneratePassesRequest, 'eventId'> & { eventId?: string }) =>
         c.post<GeneratePassesResponse>('/admin/passes/generate', req).then(r => r.data),
       quota: () =>
         c.get<PassQuotaDto[]>('/admin/passes/quota').then(r => r.data),
@@ -158,9 +164,12 @@ export const endpoints = {
     },
 
     event: {
-      get: () => c.get<EventDto>('/admin/event').then(r => r.data),
+      // Admin event picker — both events for the post-login landing page.
+      list: () => c.get<EventDto[]>('/admin/events').then(r => r.data),
+      get: (eventId: string) => c.get<EventDto>(`/admin/events/${eventId}`).then(r => r.data),
+      getBySlug: (slug: string) => c.get<EventDto>(`/admin/events/by-slug/${slug}`).then(r => r.data),
       update: (eventId: string, req: UpdateEventRequest) =>
-        c.put<EventDto>(`/admin/event/${eventId}`, req).then(r => r.data)
+        c.put<EventDto>(`/admin/events/${eventId}`, req).then(r => r.data)
     },
 
     guest: {
@@ -177,5 +186,6 @@ export const endpoints = {
 };
 
 function AdminPassTypeName(t: AdminPassType): string {
-  return (['vvip', 'guest', 'staff', 'media'] as const)[t] ?? 'pass';
+  return (['vvip', 'guest', 'staff', 'media',
+           'photographer', 'pa', 'visitor', 'emergency'] as const)[t] ?? 'pass';
 }

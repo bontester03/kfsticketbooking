@@ -4,12 +4,18 @@ import { toast } from 'sonner';
 import { Button, Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ApiError } from '@kfs/types';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 export default function GuestPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
 
-  const eventQ = useQuery({ queryKey: ['admin', 'event'], queryFn: () => api.admin.event.get() });
+  const eventId = useEventContext((s) => s.eventId);
+  const eventQ = useQuery({
+    queryKey: ['admin', 'event', eventId],
+    queryFn: () => api.admin.event.get(eventId!),
+    enabled: !!eventId
+  });
   const analyticsQ = useQuery({
     queryKey: ['admin', 'guestAnalytics'],
     queryFn: () => api.admin.guest.analytics(),
