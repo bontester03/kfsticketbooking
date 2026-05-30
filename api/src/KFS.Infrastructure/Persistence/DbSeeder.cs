@@ -154,6 +154,13 @@ public static class DbSeeder
         await CreateBucketZoneAsync(db, ev, ZoneCode.STAFF, "Staff Zone",        capacity: 100);
         await CreateBucketZoneAsync(db, ev, ZoneCode.MEDIA, "Media Zone",        capacity: 100);
 
+        // PDF-only quotas (boys event — per PDF page 2):
+        // 150 Photographers, 150 Personal Assistants, 50 Visitors (grandmothers), 20 Emergency green.
+        await CreateBucketZoneAsync(db, ev, ZoneCode.PHOTO,      "Photographers",      capacity: 150);
+        await CreateBucketZoneAsync(db, ev, ZoneCode.PASSISTANT, "Personal Assistants", capacity: 150);
+        await CreateBucketZoneAsync(db, ev, ZoneCode.VISITORS,   "Visitors",            capacity: 50);
+        await CreateBucketZoneAsync(db, ev, ZoneCode.EMERG_PDF,  "Emergency Passes",    capacity: 20);
+
         await db.SaveChangesAsync();
     }
 
@@ -175,6 +182,10 @@ public static class DbSeeder
         await CreateBucketZoneAsync(db, ev, ZoneCode.VVIP,  "VVIP Zone",  capacity: 20, ZoneVisibility.DisplayOnly);
         await CreateBucketZoneAsync(db, ev, ZoneCode.STAFF, "Staff Zone", capacity: 100);
         await CreateBucketZoneAsync(db, ev, ZoneCode.MEDIA, "Media Zone", capacity: 50);
+
+        // PDF-only quotas (girls event — per PDF page 4): 75 each. No Visitor / Emergency for girls.
+        await CreateBucketZoneAsync(db, ev, ZoneCode.PHOTO,      "Photographers",      capacity: 75);
+        await CreateBucketZoneAsync(db, ev, ZoneCode.PASSISTANT, "Personal Assistants", capacity: 75);
 
         await db.SaveChangesAsync();
     }

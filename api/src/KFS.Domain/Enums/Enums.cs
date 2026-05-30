@@ -31,7 +31,13 @@ public enum ZoneCode
     EMERG_A_LEFT  = 10,
     EMERG_A_RIGHT = 11,
     EMERG_B_LEFT  = 12,
-    EMERG_B_RIGHT = 13
+    EMERG_B_RIGHT = 13,
+
+    // PDF-only pass categories — non-reserved buckets used to track per-type quotas.
+    PHOTO        = 14,   // Photographers
+    PASSISTANT   = 15,   // Personal assistants
+    VISITORS     = 16,   // Visitors / grandmothers row (boys event)
+    EMERG_PDF    = 17    // Emergency green-zone PDF passes (boys event)
 }
 
 public enum ZoneGroup

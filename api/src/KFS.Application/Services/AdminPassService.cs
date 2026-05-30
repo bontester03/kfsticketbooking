@@ -281,14 +281,19 @@ public class AdminPassService : IAdminPassService
             .Select(g => new { Type = g.Key, Seats = g.Sum(x => x.SeatsCount) })
             .ToListAsync(ct);
 
-        var types = new[] { AdminPassType.VVIP, AdminPassType.Guest, AdminPassType.Staff, AdminPassType.Media };
+        var types = new[]
+        {
+            AdminPassType.VVIP, AdminPassType.Guest, AdminPassType.Staff, AdminPassType.Media,
+            AdminPassType.Photographer, AdminPassType.PersonalAssistant,
+            AdminPassType.Visitor, AdminPassType.Emergency
+        };
         return types.Select(t =>
         {
             var code = ZoneCodeForType(t);
             var capacity = zones.FirstOrDefault(z => z.Code == code)?.Capacity ?? 0;
             var issued = issuedByType.FirstOrDefault(x => x.Type == t)?.Seats ?? 0;
             return new PassQuotaDto(t, t.ToString(), capacity, issued, Math.Max(0, capacity - issued));
-        }).ToList();
+        }).Where(q => q.Capacity > 0 || q.Issued > 0).ToList();   // hide types that don't exist for this event
     }
 
     public async Task<PassQuotaDto> SetQuotaAsync(SetPassQuotaRequest request, CancellationToken ct = default)
@@ -320,9 +325,10 @@ public class AdminPassService : IAdminPassService
         AdminPassType.Guest             => ZoneCode.GUEST,
         AdminPassType.Staff             => ZoneCode.STAFF,
         AdminPassType.Media             => ZoneCode.MEDIA,
-        // Photographer/PersonalAssistant/Visitor/Emergency don't have dedicated zones in
-        // the current seeder — quota lives on the pass type itself in Phase 3.
-        _ => throw new AppException("bad_input",
-            $"Pass type {type} has no zone wired up yet — set its quota in Phase 3.")
+        AdminPassType.Photographer      => ZoneCode.PHOTO,
+        AdminPassType.PersonalAssistant => ZoneCode.PASSISTANT,
+        AdminPassType.Visitor           => ZoneCode.VISITORS,
+        AdminPassType.Emergency         => ZoneCode.EMERG_PDF,
+        _ => throw new AppException("bad_input", $"Unsupported pass type: {type}.")
     };
 }
