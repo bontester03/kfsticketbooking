@@ -47,7 +47,8 @@ public class ScanAuditService : IScanAuditService
         {
             seatScan.TryGetValue(i.Id, out var sc);
             var student = i.Booking?.Student;
-            var holder = student != null ? $"{i.ParentRole} of {student.FirstName} {student.LastName}".Trim() : i.ParentRole.ToString();
+            var roleLabel = ParentRoleLabels.Label(i.ParentRole, ev.Gender);
+            var holder = student != null ? $"{roleLabel} of {student.FirstName} {student.LastName}".Trim() : roleLabel;
             var detail = $"{i.Zone?.DisplayName} · {i.Seat?.FullLabel}".Trim(' ', '·', ' ');
             rows.Add(new ScanAuditRow("Seat", i.TicketNumber, holder, detail,
                 1, sc?.Count ?? 0, sc != null, sc?.First, sc?.Last));

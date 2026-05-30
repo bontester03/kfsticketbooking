@@ -222,7 +222,7 @@ public class BookingService : IBookingService
             var png = _qr.RenderPng(item.QrCodePayload!);
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
                 StudentEmail: student.Email,
-                ParentLabel: item.ParentRole == ParentRole.Mother ? "Mother" : "Father",
+                ParentLabel: ParentRoleLabels.Label(item.ParentRole, ev.Gender),
                 StudentName: $"{student.FirstName} {student.LastName}",
                 TicketLast6: item.TicketNumber[^6..],
                 Group: booking.GroupChosen,
@@ -238,7 +238,7 @@ public class BookingService : IBookingService
             {
                 var msgId = await _email.SendAsync(new OutgoingEmail(
                     student.Email,
-                    $"{ev.Name} — {item.ParentRole} ticket",
+                    $"{ev.Name} — {ParentRoleLabels.Label(item.ParentRole, ev.Gender)} ticket",
                     html,
                     new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
                 item.EmailSent = true;
@@ -332,13 +332,14 @@ public class BookingService : IBookingService
         foreach (var item in booking.Items)
         {
             var png = _qr.RenderPng(item.QrCodePayload!);
+            var label = ParentRoleLabels.Label(item.ParentRole, ev.Gender);
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
-                student.Email, item.ParentRole == ParentRole.Mother ? "Mother" : "Father",
+                student.Email, label,
                 $"{student.FirstName} {student.LastName}", item.TicketNumber[^6..],
                 booking.GroupChosen, BlockLabel(item.Zone!.Code), item.Seat!.RowLabel,
                 item.Seat.SeatNumber, ev.Name, ev.EventDate, ev.Venue, ev.MapLink), png);
             await _email.SendAsync(new OutgoingEmail(
-                student.Email, $"{ev.Name} — {item.ParentRole} ticket (resend)", html,
+                student.Email, $"{ev.Name} — {label} ticket (resend)", html,
                 new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
             item.EmailSent = true;
             item.EmailSentAt = DateTime.UtcNow;

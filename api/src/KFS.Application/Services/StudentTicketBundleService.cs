@@ -47,7 +47,7 @@ public class StudentTicketBundleService : IStudentTicketBundleService
                     Group: group,
                     Row: item.Seat?.RowLabel ?? "",
                     Seat: item.Seat?.SeatNumber ?? 0,
-                    ParentRole: item.ParentRole.ToString(),
+                    ParentRole: KFS.Domain.Enums.ParentRoleLabels.Label(item.ParentRole, ev.Gender),
                     StudentName: studentName,
                     StudentEmail: student.Email,
                     TicketNumber: item.TicketNumber,

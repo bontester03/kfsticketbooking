@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Button, Card, EmptyState, LoadingPanel, TicketCard } from '@kfs/ui';
 import { useTranslation } from '@kfs/i18n';
 import { useAuthStore } from '@kfs/api-client';
-import { BookingStatus, ZoneGroup } from '@kfs/types';
+import { BookingStatus, EventGender, ZoneGroup } from '@kfs/types';
 import { api } from '../api';
 
 export default function MyBookingsPage() {
@@ -16,6 +16,8 @@ export default function MyBookingsPage() {
   const studentEmail = useAuthStore((s) => s.email) ?? '';
 
   const bookingsQ = useQuery({ queryKey: ['bookings'], queryFn: api.bookings.list });
+  // Student's event drives the pair label — Boys: Father, Girls: Grandmother.
+  const eventQ = useQuery({ queryKey: ['events', 'active'], queryFn: api.events.active });
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
   const cancel = useMutation({
@@ -49,6 +51,7 @@ export default function MyBookingsPage() {
   }
 
   const groupLetter: 'A' | 'B' = confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B';
+  const secondLabel = eventQ.data?.gender === EventGender.Female ? 'Grandmother' : 'Father';
 
   return (
     <div className="flex flex-col gap-3">
@@ -85,7 +88,7 @@ export default function MyBookingsPage() {
             item={item}
             studentName={displayName}
             studentEmail={studentEmail}
-            parentLabel={item.parentRole === 0 ? 'Mother' : 'Father'}
+            parentLabel={item.parentRole === 0 ? 'Mother' : secondLabel}
             group={groupLetter}
           />
         ))}

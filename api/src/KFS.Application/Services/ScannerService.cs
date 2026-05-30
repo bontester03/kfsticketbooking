@@ -71,8 +71,13 @@ public class ScannerService : IScannerService
         var firstPrior = await _db.ScanLogs
             .Where(s => s.ItemId == item.Id && s.ScannedItemType == ScannedItemType.BookingItem && s.Result == ScanResult.Valid)
             .OrderBy(s => s.ScannedAt).FirstOrDefaultAsync(ct);
+        // Scan-time event lookup so the holder label matches the event's pair semantics
+        // (Mother of X / Father of X for boys, Mother of X / Grandmother of X for girls).
+        var ev = await _db.Events.FindAsync(new object[] { item.Booking.EventId }, ct);
+        var roleLabel = ev == null ? item.ParentRole.ToString()
+                                   : ParentRoleLabels.Label(item.ParentRole, ev.Gender);
         var holder = item.Booking.Student is null ? null
-            : $"{item.ParentRole} of {item.Booking.Student.FirstName} {item.Booking.Student.LastName}";
+            : $"{roleLabel} of {item.Booking.Student.FirstName} {item.Booking.Student.LastName}";
 
         if (firstPrior != null)
         {

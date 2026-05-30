@@ -69,12 +69,27 @@ public enum ZoneVisibility
 public enum ParentRole
 {
     // Boys event: Father + Mother. Girls event: Mother + Grandmother.
-    // Index 0 = "first" seat in the pair (Mother for boys, Mother for girls).
+    // Index 0 = "first" seat in the pair (Mother).
     // Index 1 = "second" seat in the pair (Father for boys, Grandmother for girls).
     // The Event.PairLabel string drives the user-facing wording.
     Mother      = 0,
     Father      = 1,
     Grandmother = 2
+}
+
+public static class ParentRoleLabels
+{
+    /// <summary>Render a ParentRole for display, swapping "Father" → "Grandmother"
+    /// when the event serves girls. Booking items still carry ParentRole.Father
+    /// internally for the second seat of the pair; only the user-facing text changes.</summary>
+    public static string Label(ParentRole role, EventGender gender) => (role, gender) switch
+    {
+        (ParentRole.Mother,      _)                      => "Mother",
+        (ParentRole.Father,      EventGender.Female)     => "Grandmother",
+        (ParentRole.Father,      _)                      => "Father",
+        (ParentRole.Grandmother, _)                      => "Grandmother",
+        _ => role.ToString()
+    };
 }
 
 public enum AdminPassType
