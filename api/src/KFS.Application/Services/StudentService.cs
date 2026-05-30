@@ -19,8 +19,19 @@ public class StudentService : IStudentService
         _db = db; _importer = importer; _hasher = hasher; _email = email;
     }
 
-    public async Task<StudentImportResultDto> ImportAsync(Stream xlsxStream, CancellationToken ct = default)
+    public async Task<StudentImportResultDto> ImportAsync(Guid eventId, Stream xlsxStream, CancellationToken ct = default)
     {
+        var targetEvent = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
+
+        // The Gender string we accept depends on which event the admin is uploading to.
+        // Boys event accepts only "Male" rows; Girls event accepts only "Female" rows.
+        // Anything else is rejected per row with a clear message so the admin sees exactly
+        // which rows were wrong instead of a silent partial import.
+        var expectedGender = targetEvent.Gender;
+        var expectedGenderText = expectedGender == EventGender.Male ? "Male" : "Female";
+        var otherGenderText    = expectedGender == EventGender.Male ? "Female" : "Male";
+
         var parsed = _importer.Parse(xlsxStream);
 
         var rowResults = new List<StudentImportRowResultDto>();
@@ -29,12 +40,6 @@ public class StudentService : IStudentService
 
         var existing = await _db.Students.Select(s => s.Email).ToListAsync(ct);
         var existingSet = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // Resolve Boys/Girls event IDs once — every student is routed to the event
-        // matching their Gender field. Skip if the matching event isn't seeded yet.
-        var events = await _db.Events.ToListAsync(ct);
-        var boysEventId = events.FirstOrDefault(e => e.Gender == EventGender.Male)?.Id;
-        var girlsEventId = events.FirstOrDefault(e => e.Gender == EventGender.Female)?.Id;
 
         var toAdd = new List<Student>();
         foreach (var row in parsed.Valid)
@@ -51,13 +56,21 @@ public class StudentService : IStudentService
             }
 
             var gender = (row.Gender ?? string.Empty).Trim();
-            Guid? eventId = gender.Equals("Male", StringComparison.OrdinalIgnoreCase) ? boysEventId
-                          : gender.Equals("Female", StringComparison.OrdinalIgnoreCase) ? girlsEventId
-                          : null;
-            if (eventId is null)
+            if (string.IsNullOrEmpty(gender))
+            {
+                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false, "Gender is required."));
+                continue;
+            }
+            if (gender.Equals(otherGenderText, StringComparison.OrdinalIgnoreCase))
             {
                 rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false,
-                    "Gender must be Male or Female (and that event must be seeded)."));
+                    $"Wrong event — this row is for the {otherGenderText} event. Upload it on /admin/{(expectedGender == EventGender.Male ? "girls" : "boys")}/students instead."));
+                continue;
+            }
+            if (!gender.Equals(expectedGenderText, StringComparison.OrdinalIgnoreCase))
+            {
+                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false,
+                    $"Gender must be {expectedGenderText} for this event (got \"{gender}\")."));
                 continue;
             }
 
@@ -70,7 +83,7 @@ public class StudentService : IStudentService
                 StudentNumber = row.StudentNumber,
                 PreferredName = row.PreferredName,
                 Gender = gender,
-                EventId = eventId.Value,
+                EventId = targetEvent.Id,
                 GradeOrClass = row.GradeOrClass,
                 AssignedGroup = row.AssignedGroup,
                 DateOfBirth = row.DateOfBirth,

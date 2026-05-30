@@ -14,13 +14,16 @@ public class AdminStudentsController : ControllerBase
     private readonly IStudentService _students;
     public AdminStudentsController(IStudentService students) => _students = students;
 
+    // Scoped to one event — rows whose Gender doesn't match get rejected with a per-row
+    // error. Prevents silent cross-event imports (an XLSX for Girls uploaded on the Boys
+    // page no longer "succeeds").
     [HttpPost("upload")]
     [RequestSizeLimit(5 * 1024 * 1024)]
-    public async Task<StudentImportResultDto> Upload(IFormFile file, CancellationToken ct)
+    public async Task<StudentImportResultDto> Upload([FromQuery] Guid eventId, IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0) throw new KFS.Application.Common.Exceptions.AppException("bad_input", "File is required.");
         await using var stream = file.OpenReadStream();
-        return await _students.ImportAsync(stream, ct);
+        return await _students.ImportAsync(eventId, stream, ct);
     }
 
     // Downloadable Excel template so admins know exactly which columns to fill in.
