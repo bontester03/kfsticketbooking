@@ -1,9 +1,10 @@
 namespace KFS.Application.Interfaces;
 
 /// <summary>One row from a staff / photographer / personal-assistant / visitor roster.
-/// Two columns: Full Name, Email. Used by AdminPassService.GenerateFromRosterAsync to
-/// produce one QR per row and email each holder their pass.</summary>
-public record ParsedPassRosterRow(int RowNumber, string FullName, string Email);
+/// Three columns: Full Name | Email | Type. The Type cell MUST match the pass type
+/// the admin picked in the UI — the service rejects any row whose Type doesn't match,
+/// so a mistakenly-mixed XLSX never silently issues wrong-category QRs.</summary>
+public record ParsedPassRosterRow(int RowNumber, string FullName, string Email, string Type);
 
 public record PassRosterRowError(int RowNumber, string Field, string Message);
 

@@ -148,6 +148,13 @@ export const endpoints = {
         c.delete<{ type: AdminPassType | null; deleted: number }>('/admin/passes/batches', { params: { type } }).then(r => r.data),
 
       // ----- Roster: 3-step UX -----
+      rosterSampleDownload: async (type: AdminPassType, label: string) => {
+        const resp = await c.get('/admin/passes/roster-sample', {
+          params: { type }, responseType: 'blob'
+        });
+        const safe = label.toLowerCase().replace(/\s+/g, '-');
+        downloadBlob(resp.data as Blob, `kfs-roster-${safe}.xlsx`);
+      },
       rosterPreview: (type: AdminPassType, file: File) => {
         const form = new FormData(); form.append('file', file);
         return c.post<RosterPreviewDto>('/admin/passes/roster-preview', form, { params: { type } }).then(r => r.data);

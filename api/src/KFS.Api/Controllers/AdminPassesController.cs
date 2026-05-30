@@ -1,3 +1,4 @@
+using ClosedXML.Excel;
 using KFS.Application.DTOs.Passes;
 using KFS.Application.Services;
 using KFS.Domain.Enums;
@@ -19,6 +20,46 @@ public class AdminPassesController : ControllerBase
         => _service.GenerateBatchAsync(request, ct);
 
     // ----- Roster: 3-step UX (Upload preview → Generate QRs → Send emails) -----
+
+    // Step 0 — download a pre-filled 3-column XLSX template for one pass type.
+    // The Type cell is set to the matching label so the admin can hand the file
+    // out and a returned upload always passes the Type-match check.
+    [HttpGet("roster-sample")]
+    public IActionResult RosterSample([FromQuery] KFS.Domain.Enums.AdminPassType type)
+    {
+        var label = type == KFS.Domain.Enums.AdminPassType.PersonalAssistant
+            ? "Personal Assistant" : type.ToString();
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add(label);
+        var headers = new[] { "Full Name", "Email", "Type" };
+        for (var c = 0; c < headers.Length; c++)
+        {
+            var cell = ws.Cell(1, c + 1);
+            cell.Value = headers[c];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#0d3128");
+            cell.Style.Font.FontColor = XLColor.White;
+        }
+        var examples = new[]
+        {
+            new[] { $"Sample {label} One",   "first.last@example.com",  label },
+            new[] { $"Sample {label} Two",   "second.last@example.com", label },
+            new[] { $"Sample {label} Three", "third.last@example.com",  label }
+        };
+        for (var r = 0; r < examples.Length; r++)
+            for (var c = 0; c < examples[r].Length; c++)
+                ws.Cell(r + 2, c + 1).Value = examples[r][c];
+
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream();
+        wb.SaveAs(ms);
+
+        var safeName = type.ToString().ToLowerInvariant();
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"kfs-roster-{safeName}.xlsx");
+    }
 
     // Step 1 — dry-run preview: parse + dedup vs existing, returns what WOULD happen.
     [HttpPost("roster-preview")]

@@ -102,7 +102,15 @@ export function RosterPanel({ type }: Props) {
         )}
       </div>
       <p className="mt-1 text-xs text-kfs-sage-600">
-        Upload a 2-column XLSX (Full Name · Email). One QR per row, emailed to each holder.
+        Upload a <b>3-column</b> XLSX: <code>Full Name · Email · Type</code>. One QR per row, emailed
+        to each holder. The <b>Type</b> column must equal <b>"{LABEL[type]}"</b> on every row —
+        wrong-type rows are rejected so a misuploaded file can't silently issue the wrong passes.
+        <button type="button"
+          onClick={() => api.admin.passes.rosterSampleDownload(type, LABEL[type] ?? 'pass')
+            .catch((e: ApiError) => toast.error(e?.message ?? 'Download failed.'))}
+          className="ml-2 text-kfs-forest underline hover:no-underline">
+          Download {LABEL[type]} template ↓
+        </button>
       </p>
 
       {/* ---------- Step 1: Upload + Preview ---------- */}

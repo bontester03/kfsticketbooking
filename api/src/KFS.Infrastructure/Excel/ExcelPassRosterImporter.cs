@@ -3,9 +3,10 @@ using KFS.Application.Interfaces;
 
 namespace KFS.Infrastructure.Excel;
 
-/// <summary>Two-column roster: Full Name | Email. Row 1 is the header and is skipped.
-/// Trimmed and email-shape-checked; broader validation happens at the service layer
-/// (dedup against existing passes, quota check).</summary>
+/// <summary>Three-column roster: Full Name | Email | Type. Row 1 is the header and
+/// is skipped. Cell trimming + email-shape check happen here; downstream validation
+/// (Type matches the pass type the admin picked, dedup vs existing, quota) happens
+/// at the service layer.</summary>
 public class ExcelPassRosterImporter : IPassRosterImporter
 {
     public PassRosterParseResult Parse(Stream xlsxStream)
@@ -22,12 +23,14 @@ public class ExcelPassRosterImporter : IPassRosterImporter
             var rn = row.RowNumber();
             var name  = row.Cell(1).GetString().Trim();
             var email = row.Cell(2).GetString().Trim();
+            var type  = row.Cell(3).GetString().Trim();
 
             if (string.IsNullOrEmpty(name))  { errors.Add(new(rn, "FullName", "Required")); continue; }
             if (string.IsNullOrEmpty(email)) { errors.Add(new(rn, "Email",    "Required")); continue; }
             if (!email.Contains('@'))         { errors.Add(new(rn, "Email",   "Malformed email")); continue; }
+            if (string.IsNullOrEmpty(type))   { errors.Add(new(rn, "Type",    "Required — must match the roster type picker (e.g. Staff, Photographer).")); continue; }
 
-            valid.Add(new ParsedPassRosterRow(rn, name, email));
+            valid.Add(new ParsedPassRosterRow(rn, name, email, type));
         }
 
         return new PassRosterParseResult(valid, errors);

@@ -125,6 +125,10 @@ public class AdminPassService : IAdminPassService
             ?? throw new NotFoundException("Event", eventId);
 
         var parsed = _rosterImporter.Parse(xlsxStream);
+        var (validRows, typeErrors) = ValidateRowTypes(parsed.Valid, type);
+        var allErrors = parsed.Errors
+            .Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message))
+            .Concat(typeErrors).ToList();
 
         var existingEmails = await _db.AdminPasses
             .Where(p => p.EventId == eventId && p.Type == type && p.IssuedToEmail != null)
@@ -134,10 +138,10 @@ public class AdminPassService : IAdminPassService
         // Dedup within the same upload too — an admin pasting the same email twice
         // shouldn't generate two QRs.
         var seenInThisUpload = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var rows = new List<RosterPreviewRowDto>(parsed.Valid.Count);
+        var rows = new List<RosterPreviewRowDto>(validRows.Count);
         var wouldImport = 0;
         var wouldSkip = 0;
-        foreach (var r in parsed.Valid)
+        foreach (var r in validRows)
         {
             var isDup = existingSet.Contains(r.Email) || !seenInThisUpload.Add(r.Email);
             rows.Add(new RosterPreviewRowDto(r.RowNumber, r.FullName, r.Email, isDup));
@@ -155,13 +159,46 @@ public class AdminPassService : IAdminPassService
             TotalRows: parsed.Valid.Count + parsed.Errors.Count,
             WouldImport: wouldImport,
             WouldSkipDuplicates: wouldSkip,
-            ErrorRows: parsed.Errors.Count,
+            ErrorRows: allErrors.Count,
             QuotaCapacity: capacity,
             QuotaIssued: issued,
             QuotaRemaining: Math.Max(0, capacity - issued),
             Rows: rows,
-            Errors: parsed.Errors.Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message)).ToList());
+            Errors: allErrors);
     }
+
+    // Strips rows whose Type cell doesn't match the admin's selected pass type and
+    // surfaces them as per-row errors. Comparison is case-insensitive and accepts
+    // both label form ("Personal Assistant") and CamelCase enum form ("PersonalAssistant").
+    private static (IReadOnlyList<ParsedPassRosterRow> Valid, List<RosterRowErrorDto> Errors)
+        ValidateRowTypes(IReadOnlyList<ParsedPassRosterRow> input, AdminPassType expected)
+    {
+        var expectedEnum = expected.ToString();                          // e.g. "PersonalAssistant"
+        var expectedLabel = TypeLabel(expected);                         // e.g. "Personal Assistant"
+        var valid = new List<ParsedPassRosterRow>(input.Count);
+        var errors = new List<RosterRowErrorDto>();
+        foreach (var r in input)
+        {
+            var normalized = r.Type.Replace(" ", "").Replace("-", "").Replace("_", "");
+            if (string.Equals(normalized, expectedEnum, StringComparison.OrdinalIgnoreCase))
+            {
+                valid.Add(r);
+            }
+            else
+            {
+                errors.Add(new RosterRowErrorDto(r.RowNumber, "Type",
+                    $"Row says \"{r.Type}\" but the roster picker is set to \"{expectedLabel}\". " +
+                    "Use the matching template or change the picker."));
+            }
+        }
+        return (valid, errors);
+    }
+
+    internal static string TypeLabel(AdminPassType t) => t switch
+    {
+        AdminPassType.PersonalAssistant => "Personal Assistant",
+        _ => t.ToString()
+    };
 
     // ---------- Step 2 — Generate QRs (no emails) ----------
 
@@ -172,16 +209,19 @@ public class AdminPassService : IAdminPassService
             ?? throw new NotFoundException("Event", eventId);
 
         var parsed = _rosterImporter.Parse(xlsxStream);
-        var errors = parsed.Errors.Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message)).ToList();
+        var (typeFiltered, typeErrors) = ValidateRowTypes(parsed.Valid, type);
+        var errors = parsed.Errors
+            .Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message))
+            .Concat(typeErrors).ToList();
 
         var existingEmails = await _db.AdminPasses
             .Where(p => p.EventId == eventId && p.Type == type && p.IssuedToEmail != null)
             .Select(p => p.IssuedToEmail!).ToListAsync(ct);
         var existingSet = existingEmails.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var toIssue = new List<ParsedPassRosterRow>(parsed.Valid.Count);
+        var toIssue = new List<ParsedPassRosterRow>(typeFiltered.Count);
         var skipped = 0;
-        foreach (var r in parsed.Valid)
+        foreach (var r in typeFiltered)
         {
             if (existingSet.Contains(r.Email)) { skipped++; continue; }
             toIssue.Add(r);
