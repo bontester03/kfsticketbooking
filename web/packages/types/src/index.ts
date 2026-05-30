@@ -220,6 +220,52 @@ export interface AdminPassDto {
   admittedCount: number;
   /** "Gate A" / "Gate B" for student-linked Guest passes, otherwise null (use type default). */
   gate?: string | null;
+  /** Roster-generated passes only — null for VVIP/Guest/Staff pool batches. */
+  issuedToEmail?: string | null;
+  /** Has the holder been emailed their QR yet? */
+  emailSent: boolean;
+  emailSentAt?: string | null;
+}
+
+export interface RosterPreviewRowDto {
+  rowNumber: number;
+  fullName: string;
+  email: string;
+  isDuplicate: boolean;
+}
+
+export interface RosterRowErrorDto {
+  rowNumber: number;
+  field: string;
+  message: string;
+}
+
+export interface RosterPreviewDto {
+  totalRows: number;
+  wouldImport: number;
+  wouldSkipDuplicates: number;
+  errorRows: number;
+  quotaCapacity: number;
+  quotaIssued: number;
+  quotaRemaining: number;
+  rows: RosterPreviewRowDto[];
+  errors: RosterRowErrorDto[];
+}
+
+export interface GenerateFromRosterResponse {
+  batchId: string;
+  rowsRead: number;
+  generated: number;
+  skipped: number;
+  errors: RosterRowErrorDto[];
+}
+
+export interface SendBatchEmailsResponse {
+  batchId: string;
+  totalInBatch: number;
+  sent: number;
+  skipped: number;
+  failed: number;
 }
 
 // ---- Guest tickets & scanning -----------------------------------------------------------------

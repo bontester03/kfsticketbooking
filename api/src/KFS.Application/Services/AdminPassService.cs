@@ -116,6 +116,55 @@ public class AdminPassService : IAdminPassService
         return new GeneratePassesResponse(batchId, request.Count, downloadUrl, request.Format);
     }
 
+    // ---------- Step 1 — Preview ----------
+
+    public async Task<RosterPreviewDto> PreviewRosterAsync(
+        Guid eventId, AdminPassType type, Stream xlsxStream, CancellationToken ct = default)
+    {
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
+
+        var parsed = _rosterImporter.Parse(xlsxStream);
+
+        var existingEmails = await _db.AdminPasses
+            .Where(p => p.EventId == eventId && p.Type == type && p.IssuedToEmail != null)
+            .Select(p => p.IssuedToEmail!).ToListAsync(ct);
+        var existingSet = existingEmails.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Dedup within the same upload too — an admin pasting the same email twice
+        // shouldn't generate two QRs.
+        var seenInThisUpload = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rows = new List<RosterPreviewRowDto>(parsed.Valid.Count);
+        var wouldImport = 0;
+        var wouldSkip = 0;
+        foreach (var r in parsed.Valid)
+        {
+            var isDup = existingSet.Contains(r.Email) || !seenInThisUpload.Add(r.Email);
+            rows.Add(new RosterPreviewRowDto(r.RowNumber, r.FullName, r.Email, isDup));
+            if (isDup) wouldSkip++; else wouldImport++;
+        }
+
+        var zoneCode = ZoneCodeForType(type);
+        var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == eventId && z.Code == zoneCode, ct);
+        var capacity = zone?.Capacity ?? 0;
+        var issued = await _db.AdminPasses
+            .Where(p => p.EventId == eventId && p.Type == type)
+            .SumAsync(p => (int?)p.SeatsCount, ct) ?? 0;
+
+        return new RosterPreviewDto(
+            TotalRows: parsed.Valid.Count + parsed.Errors.Count,
+            WouldImport: wouldImport,
+            WouldSkipDuplicates: wouldSkip,
+            ErrorRows: parsed.Errors.Count,
+            QuotaCapacity: capacity,
+            QuotaIssued: issued,
+            QuotaRemaining: Math.Max(0, capacity - issued),
+            Rows: rows,
+            Errors: parsed.Errors.Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message)).ToList());
+    }
+
+    // ---------- Step 2 — Generate QRs (no emails) ----------
+
     public async Task<GenerateFromRosterResponse> GenerateFromRosterAsync(
         Guid eventId, AdminPassType type, Stream xlsxStream, CancellationToken ct = default)
     {
@@ -125,8 +174,6 @@ public class AdminPassService : IAdminPassService
         var parsed = _rosterImporter.Parse(xlsxStream);
         var errors = parsed.Errors.Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message)).ToList();
 
-        // Skip duplicates against existing passes of this (event, type) — re-uploading
-        // a roster that overlaps shouldn't double-issue.
         var existingEmails = await _db.AdminPasses
             .Where(p => p.EventId == eventId && p.Type == type && p.IssuedToEmail != null)
             .Select(p => p.IssuedToEmail!).ToListAsync(ct);
@@ -138,10 +185,9 @@ public class AdminPassService : IAdminPassService
         {
             if (existingSet.Contains(r.Email)) { skipped++; continue; }
             toIssue.Add(r);
-            existingSet.Add(r.Email);    // dedup within the same upload
+            existingSet.Add(r.Email);
         }
 
-        // Quota check (1 seat per row for non-Guest types).
         var zoneCode = ZoneCodeForType(type);
         var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == eventId && z.Code == zoneCode, ct);
         var capacity = zone?.Capacity ?? 0;
@@ -154,7 +200,6 @@ public class AdminPassService : IAdminPassService
 
         var batchId = Guid.NewGuid();
         var qrExpiry = ev.EventDate.AddHours(36);
-        var generated = new List<(AdminPass Pass, string Email, byte[] Png)>(toIssue.Count);
 
         for (var i = 0; i < toIssue.Count; i++)
         {
@@ -173,44 +218,83 @@ public class AdminPassService : IAdminPassService
                 IssuedToEmail = r.Email.ToLowerInvariant(),
                 IssuedByAdminId = _currentUser.UserId,
                 IssuedAt = DateTime.UtcNow
+                // EmailSent defaults to false — Step 3 flips it.
             };
             pass.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
                 pass.Id, ev.Id, ScannedItemType.AdminPass, zoneCode, null, 1, qrExpiry));
             var png = _qr.RenderPng(pass.QrCodePayload);
             pass.QrCodeImageUrl = await _blobs.SaveAsync($"qr-codes/{ev.Id}/{ticket}.png", png, "image/png", ct);
             _db.AdminPasses.Add(pass);
-            generated.Add((pass, r.Email, png));
         }
         await _db.SaveChangesAsync(ct);
-
-        // Fire-and-forget email batch. Slow / failing SMTP must not block the admin response.
-        var eventName = ev.Name;
-        var eventDate = ev.EventDate;
-        var sender = _email;
-        var typeLabel = type.ToString();
-        _ = Task.Run(async () =>
-        {
-            foreach (var (pass, email, png) in generated)
-            {
-                try
-                {
-                    var subject = $"{eventName} — your {typeLabel} pass";
-                    var html = BuildRosterEmailHtml(eventName, eventDate, typeLabel, pass.IssuedToName ?? "", pass.TicketNumber);
-                    await sender.SendAsync(new OutgoingEmail(
-                        email, subject, html,
-                        new[] { new EmailAttachment($"{pass.TicketNumber}.png", "image/png", png) }), CancellationToken.None);
-                }
-                catch { /* SmtpEmailService logs its own failures */ }
-            }
-        });
 
         return new GenerateFromRosterResponse(
             BatchId: batchId,
             RowsRead: parsed.Valid.Count + parsed.Errors.Count,
-            Generated: generated.Count,
+            Generated: toIssue.Count,
             Skipped: skipped,
-            EmailsQueued: generated.Count,
             Errors: errors);
+    }
+
+    // ---------- Step 3a — Bulk send emails for a batch ----------
+
+    public async Task<SendBatchEmailsResponse> SendBatchEmailsAsync(Guid batchId, bool force, CancellationToken ct = default)
+    {
+        var passes = await _db.AdminPasses
+            .Include(p => p.Event)
+            .Where(p => p.BatchId == batchId && p.IssuedToEmail != null)
+            .ToListAsync(ct);
+        if (passes.Count == 0) throw new NotFoundException("Batch", batchId);
+
+        var sent = 0; var skipped = 0; var failed = 0;
+        foreach (var pass in passes)
+        {
+            if (!force && pass.EmailSent) { skipped++; continue; }
+            try
+            {
+                await SendOnePassEmailAsync(pass, ct);
+                pass.EmailSent = true;
+                pass.EmailSentAt = DateTime.UtcNow;
+                sent++;
+            }
+            catch { failed++; }
+        }
+        await _db.SaveChangesAsync(ct);
+        return new SendBatchEmailsResponse(batchId, passes.Count, sent, skipped, failed);
+    }
+
+    // ---------- Step 3b — Resend one pass ----------
+
+    public async Task<AdminPassDto> ResendPassEmailAsync(Guid passId, CancellationToken ct = default)
+    {
+        var pass = await _db.AdminPasses
+            .Include(p => p.Event)
+            .FirstOrDefaultAsync(p => p.Id == passId, ct)
+            ?? throw new NotFoundException("AdminPass", passId);
+        if (string.IsNullOrWhiteSpace(pass.IssuedToEmail))
+            throw new AppException("no_email", "This pass has no email address on file.");
+
+        await SendOnePassEmailAsync(pass, ct);
+        pass.EmailSent = true;
+        pass.EmailSentAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return new AdminPassDto(pass.Id, pass.BatchId, pass.Type, pass.SequenceNumber, pass.TicketNumber,
+            pass.SeatsCount, pass.IssuedToName,
+            pass.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(pass.QrCodeImageUrl),
+            pass.IssuedAt, 0, null, pass.IssuedToEmail, pass.EmailSent, pass.EmailSentAt);
+    }
+
+    private async Task SendOnePassEmailAsync(AdminPass pass, CancellationToken ct)
+    {
+        var ev = pass.Event!;
+        var png = _qr.RenderPng(pass.QrCodePayload);
+        var typeLabel = pass.Type.ToString();
+        var subject = $"{ev.Name} — your {typeLabel} pass";
+        var html = BuildRosterEmailHtml(ev.Name, ev.EventDate, typeLabel, pass.IssuedToName ?? "", pass.TicketNumber);
+        await _email.SendAsync(new OutgoingEmail(
+            pass.IssuedToEmail!, subject, html,
+            new[] { new EmailAttachment($"{pass.TicketNumber}.png", "image/png", png) }), ct);
     }
 
     private static string BuildRosterEmailHtml(string eventName, DateTime eventDate, string passType, string holderName, string ticketNo) =>
@@ -278,7 +362,8 @@ public class AdminPassService : IAdminPassService
             // Re-sign the SAS so on-screen previews don't 403 on an expired token.
             p.IssuedToName, p.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(p.QrCodeImageUrl), p.IssuedAt,
             admittedByPass.TryGetValue(p.Id, out var c) ? c : 0,
-            p.Type == AdminPassType.Guest && p.StudentId != null && gateByStudent.TryGetValue(p.StudentId.Value, out var g) ? g : null))
+            p.Type == AdminPassType.Guest && p.StudentId != null && gateByStudent.TryGetValue(p.StudentId.Value, out var g) ? g : null,
+            p.IssuedToEmail, p.EmailSent, p.EmailSentAt))
             .ToList();
     }
 
@@ -290,7 +375,8 @@ public class AdminPassService : IAdminPassService
         await _db.SaveChangesAsync(ct);
         return new AdminPassDto(pass.Id, pass.BatchId, pass.Type, pass.SequenceNumber, pass.TicketNumber,
             pass.SeatsCount, pass.IssuedToName,
-            pass.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(pass.QrCodeImageUrl), pass.IssuedAt);
+            pass.QrCodeImageUrl is null ? null : _blobs.RefreshReadUrl(pass.QrCodeImageUrl), pass.IssuedAt,
+            0, null, pass.IssuedToEmail, pass.EmailSent, pass.EmailSentAt);
     }
 
     public async Task<(byte[] Bytes, string ContentType, string FileName)> DownloadBatchAsync(

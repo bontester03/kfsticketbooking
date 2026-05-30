@@ -6,14 +6,52 @@ import { AdminPassType, PassOutputFormat } from '@kfs/types';
 import type { ApiError, AdminPassType as PassTypeT, PassBatchSummaryDto, PassQuotaDto } from '@kfs/types';
 import { formatRiyadhDate } from '@kfs/utils';
 import { api } from '../api';
+import { RosterPanel } from '../components/RosterPanel';
+
+// Pass types that have a named holder + email address (driven by a roster upload).
+// VVIP / Guest fall outside this — VVIP is a pool of anonymous QRs and Guest is
+// student-self-booked. Photographer/PA/Visitor/Emergency aren't always emailed in
+// practice but admins can if they have a roster handy.
+const ROSTER_TYPE_OPTIONS: { value: PassTypeT; label: string }[] = [
+  { value: AdminPassType.Staff,             label: 'Staff' },
+  { value: AdminPassType.Media,             label: 'Media' },
+  { value: AdminPassType.Photographer,      label: 'Photographer' },
+  { value: AdminPassType.PersonalAssistant, label: 'Personal Assistant' },
+  { value: AdminPassType.Visitor,           label: 'Visitor' },
+  { value: AdminPassType.Emergency,         label: 'Emergency' }
+];
+
+function RosterPanelWithTypePicker() {
+  const [rosterType, setRosterType] = useState<PassTypeT>(AdminPassType.Staff);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-semibold text-kfs-forest">Roster type:</label>
+        <select className="input w-56" value={rosterType}
+                onChange={(e) => setRosterType(Number(e.target.value) as PassTypeT)}>
+          {ROSTER_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+      <RosterPanel key={rosterType} type={rosterType} />
+    </div>
+  );
+}
 
 const TYPE_OPTIONS: { value: PassTypeT; label: string }[] = [
-  { value: AdminPassType.VVIP,  label: 'VVIP' },
-  { value: AdminPassType.Guest, label: 'Guest' },
-  { value: AdminPassType.Staff, label: 'Staff' },
-  { value: AdminPassType.Media, label: 'Media' }
+  { value: AdminPassType.VVIP,              label: 'VVIP' },
+  { value: AdminPassType.Guest,             label: 'Guest' },
+  { value: AdminPassType.Staff,             label: 'Staff' },
+  { value: AdminPassType.Media,             label: 'Media' },
+  { value: AdminPassType.Photographer,      label: 'Photographer' },
+  { value: AdminPassType.PersonalAssistant, label: 'Personal Assistant' },
+  { value: AdminPassType.Visitor,           label: 'Visitor' },
+  { value: AdminPassType.Emergency,         label: 'Emergency' }
 ];
-const TYPE_NAME = ['VVIP', 'Guest', 'Staff', 'Media'];
+// Index matches AdminPassType enum value (0..7).
+const TYPE_NAME = [
+  'VVIP', 'Guest', 'Staff', 'Media',
+  'Photographer', 'Personal Assistant', 'Visitor', 'Emergency'
+];
 
 export default function PassesPage() {
   const qc = useQueryClient();
@@ -129,11 +167,15 @@ export default function PassesPage() {
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-xl font-semibold text-kfs-forest">Passes</h1>
-        <p className="text-sm text-kfs-sage-700">Generate printable QR passes for VVIP, Guest, Staff and Media zones.</p>
+        <p className="text-sm text-kfs-sage-700">Generate printable QR passes for VVIP, Guest, Staff, Media, Photographer, Personal Assistant, Visitor and Emergency zones.</p>
       </div>
 
       {/* ---- Per-type limits & usage ---- */}
       <QuotaTable quota={quotaQ.data} loading={quotaQ.isLoading} />
+
+      {/* ---- Roster upload (3-step: Upload → Generate → Email) ----
+           Used for the email-able pass types where every holder has a name + address. */}
+      <RosterPanelWithTypePicker />
 
       {/* ---- Generate ---- */}
       <Card className="flex flex-col gap-3">

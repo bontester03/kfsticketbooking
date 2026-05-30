@@ -4,7 +4,8 @@ import type {
   StudentDto, StudentImportResultDto, ResetPasswordResponseDto, DashboardStatsDto,
   GeneratePassesRequest, GeneratePassesResponse, AdminPassDto, PassBatchSummaryDto,
   PassOutputFormat, AdminPassType, ReminderLogDto, UpdateEventRequest, BookingStatus,
-  PassQuotaDto, GuestPassDto, GuestAnalyticsDto, GuestEligibleStudentDto, ScanResponse, ScanAuditDto
+  PassQuotaDto, GuestPassDto, GuestAnalyticsDto, GuestEligibleStudentDto, ScanResponse, ScanAuditDto,
+  RosterPreviewDto, GenerateFromRosterResponse, SendBatchEmailsResponse
 } from '@kfs/types';
 
 // Triggers a browser download of a Blob response with the given filename.
@@ -144,7 +145,21 @@ export const endpoints = {
       deleteBatch: (batchId: string) =>
         c.delete<{ batchId: string; deleted: number }>(`/admin/passes/batches/${batchId}`).then(r => r.data),
       deleteAll: (type?: AdminPassType) =>
-        c.delete<{ type: AdminPassType | null; deleted: number }>('/admin/passes/batches', { params: { type } }).then(r => r.data)
+        c.delete<{ type: AdminPassType | null; deleted: number }>('/admin/passes/batches', { params: { type } }).then(r => r.data),
+
+      // ----- Roster: 3-step UX -----
+      rosterPreview: (type: AdminPassType, file: File) => {
+        const form = new FormData(); form.append('file', file);
+        return c.post<RosterPreviewDto>('/admin/passes/roster-preview', form, { params: { type } }).then(r => r.data);
+      },
+      generateFromRoster: (type: AdminPassType, file: File) => {
+        const form = new FormData(); form.append('file', file);
+        return c.post<GenerateFromRosterResponse>('/admin/passes/from-roster', form, { params: { type } }).then(r => r.data);
+      },
+      sendBatchEmails: (batchId: string, force = false) =>
+        c.post<SendBatchEmailsResponse>(`/admin/passes/batches/${batchId}/send-emails`, null, { params: { force } }).then(r => r.data),
+      resendPassEmail: (passId: string) =>
+        c.post<AdminPassDto>(`/admin/passes/${passId}/send-email`).then(r => r.data)
     },
 
     reports: {

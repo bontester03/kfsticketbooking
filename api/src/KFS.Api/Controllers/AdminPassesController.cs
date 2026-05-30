@@ -18,7 +18,24 @@ public class AdminPassesController : ControllerBase
     public Task<GeneratePassesResponse> Generate([FromBody] GeneratePassesRequest request, CancellationToken ct)
         => _service.GenerateBatchAsync(request, ct);
 
-    // Roster upload: 2-column XLSX (Full Name, Email). One QR per row, emailed to each holder.
+    // ----- Roster: 3-step UX (Upload preview → Generate QRs → Send emails) -----
+
+    // Step 1 — dry-run preview: parse + dedup vs existing, returns what WOULD happen.
+    [HttpPost("roster-preview")]
+    [RequestSizeLimit(5 * 1024 * 1024)]
+    public async Task<RosterPreviewDto> RosterPreview(
+        [FromQuery] Guid eventId,
+        [FromQuery] KFS.Domain.Enums.AdminPassType type,
+        IFormFile file,
+        CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            throw new KFS.Application.Common.Exceptions.AppException("bad_input", "File is required.");
+        await using var stream = file.OpenReadStream();
+        return await _service.PreviewRosterAsync(eventId, type, stream, ct);
+    }
+
+    // Step 2 — commit: generate one AdminPass + QR per non-duplicate row. No emails sent.
     [HttpPost("from-roster")]
     [RequestSizeLimit(5 * 1024 * 1024)]
     public async Task<GenerateFromRosterResponse> FromRoster(
@@ -32,6 +49,18 @@ public class AdminPassesController : ControllerBase
         await using var stream = file.OpenReadStream();
         return await _service.GenerateFromRosterAsync(eventId, type, stream, ct);
     }
+
+    // Step 3a — bulk send emails for every roster-generated pass in the batch that
+    // hasn't been emailed yet. Pass ?force=true to re-send everything.
+    [HttpPost("batches/{batchId:guid}/send-emails")]
+    public Task<SendBatchEmailsResponse> SendBatchEmails(Guid batchId,
+        [FromQuery] bool force = false, CancellationToken ct = default)
+        => _service.SendBatchEmailsAsync(batchId, force, ct);
+
+    // Step 3b — resend the email for one pass (admin clicks "Resend" in the list view).
+    [HttpPost("{passId:guid}/send-email")]
+    public Task<AdminPassDto> SendOneEmail(Guid passId, CancellationToken ct)
+        => _service.ResendPassEmailAsync(passId, ct);
 
     [HttpGet("batches")]
     public Task<IReadOnlyList<PassBatchSummaryDto>> Batches([FromQuery] Guid eventId, CancellationToken ct)

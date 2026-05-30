@@ -19,8 +19,12 @@ public class AdminPass : BaseEntity
     public int SeatsCount { get; set; } = 1;
     public string? IssuedToName { get; set; }
     /// <summary>Set when the pass was generated from a staff/photographer/PA roster —
-    /// drives the fire-and-forget "your pass" email after a batch is generated.</summary>
+    /// drives the per-pass "your pass" email + the bulk Send-emails action.</summary>
     public string? IssuedToEmail { get; set; }
+    /// <summary>Did the holder receive their QR by email? Flipped true after a successful
+    /// SmtpClient.SendAsync; admins use the per-pass Resend button if it's still false.</summary>
+    public bool EmailSent { get; set; }
+    public DateTime? EmailSentAt { get; set; }
     public Guid? IssuedByAdminId { get; set; }
 
     // Set when a pass is tied to a specific child: a student self-books a Guest ticket

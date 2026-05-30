@@ -7,11 +7,25 @@ public interface IAdminPassService
 {
     Task<GeneratePassesResponse> GenerateBatchAsync(GeneratePassesRequest request, CancellationToken ct = default);
 
-    /// <summary>Generate one QR per row from a name+email XLSX roster, then email each
-    /// holder their pass (fire-and-forget). Used for Staff / Photographer / Personal
-    /// Assistant / Visitor / Emergency rosters.</summary>
+    // ----- Roster: 3-step UX (Upload preview → Generate QRs → Send emails) -----
+
+    /// <summary>Step 1 — dry-run preview. Parses the XLSX and reports what would
+    /// happen if the admin confirmed (rows to import, duplicates, quota state).
+    /// No DB changes.</summary>
+    Task<RosterPreviewDto> PreviewRosterAsync(
+        Guid eventId, KFS.Domain.Enums.AdminPassType type, Stream xlsxStream, CancellationToken ct = default);
+
+    /// <summary>Step 2 — generate one AdminPass + QR per non-duplicate row.
+    /// Does NOT send emails; the admin triggers that explicitly in Step 3.</summary>
     Task<GenerateFromRosterResponse> GenerateFromRosterAsync(
         Guid eventId, KFS.Domain.Enums.AdminPassType type, Stream xlsxStream, CancellationToken ct = default);
+
+    /// <summary>Step 3a — send the "your pass" email for every roster-generated
+    /// pass in the batch that hasn't been emailed yet (or all if force=true).</summary>
+    Task<SendBatchEmailsResponse> SendBatchEmailsAsync(Guid batchId, bool force, CancellationToken ct = default);
+
+    /// <summary>Step 3b — resend the email for a single pass, regardless of EmailSent state.</summary>
+    Task<AdminPassDto> ResendPassEmailAsync(Guid passId, CancellationToken ct = default);
     /// <summary>Scoped to one event — the admin event-picker UI passes its eventId.</summary>
     Task<IReadOnlyList<PassBatchSummaryDto>> ListBatchesAsync(Guid eventId, CancellationToken ct = default);
     Task<IReadOnlyList<AdminPassDto>> ListPassesAsync(Guid eventId, Guid? batchId, CancellationToken ct = default);

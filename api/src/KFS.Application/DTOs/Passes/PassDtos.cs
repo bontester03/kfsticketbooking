@@ -19,7 +19,11 @@ public record AdminPassDto(
     int AdmittedCount = 0,
     // For student-linked Guest passes: "Gate A" or "Gate B" matching the child's VIP booking.
     // Null for unlinked pool passes (UI falls back to the per-type default gate label).
-    string? Gate = null);
+    string? Gate = null,
+    // Roster-generated passes — drives the per-pass "Sent at X" / "Resend" UI.
+    string? IssuedToEmail = null,
+    bool EmailSent = false,
+    DateTime? EmailSentAt = null);
 
 public record PassBatchSummaryDto(
     Guid BatchId,
@@ -40,16 +44,41 @@ public record PassQuotaDto(AdminPassType Type, string Label, int Capacity, int I
 public record SetPassQuotaRequest(Guid EventId, AdminPassType Type, int Capacity);
 
 /// <summary>Result of /admin/passes/from-roster — admin uploads a name+email XLSX,
-/// one QR is generated per row and emailed to each holder asynchronously.</summary>
+/// one QR is generated per row. Emails are NOT sent here — use the dedicated
+/// send-emails endpoint as Step 3 of the Upload → Generate → Send flow.</summary>
 public record GenerateFromRosterResponse(
     Guid BatchId,
     int RowsRead,
     int Generated,
     int Skipped,
-    int EmailsQueued,
     IReadOnlyList<RosterRowErrorDto> Errors);
 
 public record RosterRowErrorDto(int RowNumber, string Field, string Message);
+
+/// <summary>Step 1 dry-run preview. Parses the XLSX, dedups against existing passes
+/// of (event, type) by IssuedToEmail, returns what would happen if the admin
+/// confirmed. No DB changes.</summary>
+public record RosterPreviewDto(
+    int TotalRows,
+    int WouldImport,
+    int WouldSkipDuplicates,
+    int ErrorRows,
+    int QuotaCapacity,
+    int QuotaIssued,
+    int QuotaRemaining,
+    IReadOnlyList<RosterPreviewRowDto> Rows,
+    IReadOnlyList<RosterRowErrorDto> Errors);
+
+public record RosterPreviewRowDto(int RowNumber, string FullName, string Email, bool IsDuplicate);
+
+/// <summary>Bulk send-emails result for a whole batch. Each call only re-sends
+/// passes where EmailSent = false unless force = true.</summary>
+public record SendBatchEmailsResponse(
+    Guid BatchId,
+    int TotalInBatch,
+    int Sent,
+    int Skipped,
+    int Failed);
 
 // A Guest ticket tied to a child (1 QR admits 3). AdmittedCount = valid scans so far.
 public record GuestPassDto(
