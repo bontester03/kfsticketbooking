@@ -20,8 +20,8 @@ public class StudentTicketBundleService : IStudentTicketBundleService
     {
         var student = await _db.Students.FirstOrDefaultAsync(s => s.Id == studentId, ct)
             ?? throw new NotFoundException("Student", studentId);
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { student.EventId }, ct)
+            ?? throw new AppException("no_event", "Student is not bound to an event.");
 
         // Confirmed parent passes for this child (most recent first).
         var bookings = await _db.Bookings

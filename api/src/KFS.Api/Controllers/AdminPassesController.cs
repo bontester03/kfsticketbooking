@@ -19,11 +19,12 @@ public class AdminPassesController : ControllerBase
         => _service.GenerateBatchAsync(request, ct);
 
     [HttpGet("batches")]
-    public Task<IReadOnlyList<PassBatchSummaryDto>> Batches(CancellationToken ct) => _service.ListBatchesAsync(ct);
+    public Task<IReadOnlyList<PassBatchSummaryDto>> Batches([FromQuery] Guid eventId, CancellationToken ct)
+        => _service.ListBatchesAsync(eventId, ct);
 
     [HttpGet]
-    public Task<IReadOnlyList<AdminPassDto>> List([FromQuery] Guid? batchId, CancellationToken ct)
-        => _service.ListPassesAsync(batchId, ct);
+    public Task<IReadOnlyList<AdminPassDto>> List([FromQuery] Guid eventId, [FromQuery] Guid? batchId, CancellationToken ct)
+        => _service.ListPassesAsync(eventId, batchId, ct);
 
     [HttpPatch("{id:guid}")]
     public Task<AdminPassDto> Update(Guid id, [FromBody] UpdatePassRequest request, CancellationToken ct)
@@ -43,16 +44,18 @@ public class AdminPassesController : ControllerBase
         return Ok(new { batchId, deleted });
     }
 
-    // Wipes every pass (optionally just one type). Filtered by ?type=VVIP|Guest|Staff|Media; omit for all.
+    // Wipes every pass for the given event (optionally just one type). Filtered by ?type=VVIP|Guest|Staff|Media.
     [HttpDelete("batches")]
-    public async Task<IActionResult> DeleteAll([FromQuery] KFS.Domain.Enums.AdminPassType? type, CancellationToken ct)
+    public async Task<IActionResult> DeleteAll([FromQuery] Guid eventId,
+        [FromQuery] KFS.Domain.Enums.AdminPassType? type, CancellationToken ct)
     {
-        var deleted = await _service.DeleteAllAsync(type, ct);
-        return Ok(new { type, deleted });
+        var deleted = await _service.DeleteAllAsync(eventId, type, ct);
+        return Ok(new { eventId, type, deleted });
     }
 
     [HttpGet("quota")]
-    public Task<IReadOnlyList<PassQuotaDto>> Quota(CancellationToken ct) => _service.GetQuotasAsync(ct);
+    public Task<IReadOnlyList<PassQuotaDto>> Quota([FromQuery] Guid eventId, CancellationToken ct)
+        => _service.GetQuotasAsync(eventId, ct);
 
     [HttpPut("quota")]
     public Task<PassQuotaDto> SetQuota([FromBody] SetPassQuotaRequest request, CancellationToken ct)

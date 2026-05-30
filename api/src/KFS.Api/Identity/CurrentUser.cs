@@ -30,6 +30,15 @@ public class CurrentUser : ICurrentUser
         }
     }
 
+    public Guid? EventId
+    {
+        get
+        {
+            var raw = Principal?.FindFirstValue("eid");
+            return Guid.TryParse(raw, out var id) ? id : null;
+        }
+    }
+
     public string? Email => Principal?.FindFirstValue(ClaimTypes.Email);
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated ?? false;
     public bool IsAdmin => UserType == Domain.Enums.UserType.Admin;

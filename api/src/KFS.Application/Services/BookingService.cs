@@ -59,8 +59,9 @@ public class BookingService : IBookingService
             throw new AppException("wrong_group",
                 $"Your booking is restricted to VIP {(student.AssignedGroup.Value == ZoneGroup.A ? "A" : "B")}.");
 
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.", 409);
+        // Scope to THIS student's event — Boys student can never book a Girls-event seat.
+        var ev = await _db.Events.FindAsync(new object[] { student.EventId }, ct)
+            ?? throw new AppException("no_event", "Student is not bound to an event.", 409);
 
         var now = DateTime.UtcNow;
         if (now < ev.BookingOpensAt) throw new AppException("not_open", "Booking has not opened yet.");

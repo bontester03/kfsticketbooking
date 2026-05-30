@@ -23,6 +23,13 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
         b.Property(x => x.AssignedGroup).HasConversion<int?>();
         b.Property(x => x.PasswordHash).IsRequired();
         b.Property(x => x.DateOfBirth).HasColumnType("date");
+
+        // Multi-event scoping. Students belong to exactly one event (resolved
+        // from Gender at import). Restrict delete: an event with students can't
+        // be wiped without first orphaning / re-assigning them.
+        b.HasOne(x => x.Event).WithMany(e => e.Students)
+            .HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.EventId);
     }
 }
 
@@ -45,6 +52,11 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
     {
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(160).IsRequired();
+        b.Property(x => x.Slug).HasMaxLength(40).IsRequired();
+        b.HasIndex(x => x.Slug).IsUnique();
+        b.Property(x => x.Gender).HasConversion<int>();
+        b.HasIndex(x => x.Gender).IsUnique();   // one event per gender
+        b.Property(x => x.PairLabel).HasMaxLength(80).IsRequired();
         b.Property(x => x.Venue).HasMaxLength(160).IsRequired();
         b.Property(x => x.VenueAddress).HasMaxLength(280).IsRequired();
         b.Property(x => x.MapLink).HasMaxLength(500);
@@ -62,6 +74,7 @@ public class ZoneConfiguration : IEntityTypeConfiguration<Zone>
         b.Property(x => x.Code).HasConversion<int>();
         b.Property(x => x.Group).HasConversion<int>();
         b.Property(x => x.Side).HasConversion<int>();
+        b.Property(x => x.Visibility).HasConversion<int>();
         b.Property(x => x.DisplayName).HasMaxLength(120).IsRequired();
 
         b.HasOne(x => x.Event).WithMany(e => e.Zones).HasForeignKey(x => x.EventId)
@@ -156,7 +169,10 @@ public class ScanLogConfiguration : IEntityTypeConfiguration<ScanLog>
         b.Property(x => x.Result).HasConversion<int>();
         b.Property(x => x.ScannerIp).HasMaxLength(64);
         b.Property(x => x.DeviceInfo).HasMaxLength(500);
+        b.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+            .OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(x => x.ScannedAt);
+        b.HasIndex(x => new { x.EventId, x.ScannedAt });
         b.HasIndex(x => new { x.ScannedItemType, x.ItemId });
     }
 }

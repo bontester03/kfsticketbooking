@@ -30,6 +30,12 @@ public class StudentService : IStudentService
         var existing = await _db.Students.Select(s => s.Email).ToListAsync(ct);
         var existingSet = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Resolve Boys/Girls event IDs once — every student is routed to the event
+        // matching their Gender field. Skip if the matching event isn't seeded yet.
+        var events = await _db.Events.ToListAsync(ct);
+        var boysEventId = events.FirstOrDefault(e => e.Gender == EventGender.Male)?.Id;
+        var girlsEventId = events.FirstOrDefault(e => e.Gender == EventGender.Female)?.Id;
+
         var toAdd = new List<Student>();
         foreach (var row in parsed.Valid)
         {
@@ -44,6 +50,17 @@ public class StudentService : IStudentService
                 continue;
             }
 
+            var gender = (row.Gender ?? string.Empty).Trim();
+            Guid? eventId = gender.Equals("Male", StringComparison.OrdinalIgnoreCase) ? boysEventId
+                          : gender.Equals("Female", StringComparison.OrdinalIgnoreCase) ? girlsEventId
+                          : null;
+            if (eventId is null)
+            {
+                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false,
+                    "Gender must be Male or Female (and that event must be seeded)."));
+                continue;
+            }
+
             var initialPassword = ComputeInitialPassword(row.FirstName, row.StudentNumber, row.DateOfBirth);
             toAdd.Add(new Student
             {
@@ -52,7 +69,8 @@ public class StudentService : IStudentService
                 LastName = row.LastName,
                 StudentNumber = row.StudentNumber,
                 PreferredName = row.PreferredName,
-                Gender = row.Gender,
+                Gender = gender,
+                EventId = eventId.Value,
                 GradeOrClass = row.GradeOrClass,
                 AssignedGroup = row.AssignedGroup,
                 DateOfBirth = row.DateOfBirth,
@@ -150,7 +168,8 @@ public class StudentService : IStudentService
         // Fire-and-forget the email so the admin sees the new password instantly. A slow or
         // failing SMTP server (auth disabled, proxy, etc.) won't block the response — the
         // SmtpEmailService logs its own failures.
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
+        // Pulls the event name from the STUDENT's event (Boys vs Girls).
+        var ev = await _db.Events.FindAsync(new object[] { s.EventId }, ct);
         var eventName = ev?.Name ?? "King Faisal School Event";
         var html = $@"
 <div style='font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#14241f'>
@@ -215,11 +234,12 @@ public class StudentService : IStudentService
         return count;
     }
 
-    public async Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(CancellationToken ct = default)
+    public async Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(Guid eventId, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct);
         var eventName = ev?.Name ?? "King Faisal School Event";
-        var students = await _db.Students.Where(s => s.IsActive).ToListAsync(ct);
+        // Per-event roster — Boys-event welcome batch never emails Girls students.
+        var students = await _db.Students.Where(s => s.IsActive && s.EventId == eventId).ToListAsync(ct);
         if (students.Count == 0) return new SendWelcomeEmailsResponseDto(0, 0);
 
         // Reset each student to their initial password so the temp password in the email actually works.

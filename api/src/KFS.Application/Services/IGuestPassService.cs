@@ -11,7 +11,7 @@ public interface IGuestPassService
     /// <summary>The child's guest ticket (with live scan status), or null if they have none.</summary>
     Task<GuestPassDto?> GetForStudentAsync(Guid studentId, CancellationToken ct = default);
 
-    Task<GuestAnalyticsDto> GetAnalyticsAsync(CancellationToken ct = default);
+    Task<GuestAnalyticsDto> GetAnalyticsAsync(Guid eventId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<GuestEligibleStudentDto>> ListStudentsAsync(string? search, CancellationToken ct = default);
+    Task<IReadOnlyList<GuestEligibleStudentDto>> ListStudentsAsync(Guid eventId, string? search, CancellationToken ct = default);
 }

@@ -14,6 +14,7 @@ public class AdminScansController : ControllerBase
     public AdminScansController(IScanAuditService audit) => _audit = audit;
 
     [HttpGet]
-    public Task<ScanAuditDto> Audit([FromQuery] string? search, [FromQuery] string? status, [FromQuery] string? kind, CancellationToken ct)
-        => _audit.GetAuditAsync(search, status, kind, ct);
+    public Task<ScanAuditDto> Audit([FromQuery] Guid eventId, [FromQuery] string? search,
+        [FromQuery] string? status, [FromQuery] string? kind, CancellationToken ct)
+        => _audit.GetAuditAsync(eventId, search, status, kind, ct);
 }

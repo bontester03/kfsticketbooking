@@ -5,9 +5,9 @@ namespace KFS.Application.Services;
 
 public interface IReportService
 {
-    Task<GroupReportData> GetGroupReportAsync(ZoneGroup group, CancellationToken ct = default);
+    Task<GroupReportData> GetGroupReportAsync(Guid eventId, ZoneGroup group, CancellationToken ct = default);
     Task<byte[]> ExportXlsxAsync(GroupReportData data, CancellationToken ct = default);
     Task<byte[]> ExportPdfAsync(GroupReportData data, CancellationToken ct = default);
     Task<byte[]> ExportCsvAsync(GroupReportData data, CancellationToken ct = default);
-    Task<DashboardStatsDto> GetDashboardAsync(CancellationToken ct = default);
+    Task<DashboardStatsDto> GetDashboardAsync(Guid eventId, CancellationToken ct = default);
 }

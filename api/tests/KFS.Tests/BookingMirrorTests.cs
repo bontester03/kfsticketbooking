@@ -31,11 +31,16 @@ public class StudentInitialPasswordTests
     [InlineData("Layan", 2009, 6, 22, "Lay22062009")]
     [InlineData("Yousef", 2010, 11, 4, "You04112010")]
     public void Computes_documented_format(string firstName, int y, int m, int d, string expected)
-        => StudentService.ComputeInitialPassword(firstName, new DateTime(y, m, d))
+        => StudentService.ComputeInitialPassword(firstName, studentNumber: null, new DateTime(y, m, d))
             .Should().Be(expected);
 
     [Fact]
     public void Pads_short_first_names_to_three_chars()
-        => StudentService.ComputeInitialPassword("Al", new DateTime(2010, 1, 2))
+        => StudentService.ComputeInitialPassword("Al", studentNumber: null, new DateTime(2010, 1, 2))
             .Should().Be("Alx02012010");
+
+    [Fact]
+    public void Prefers_student_number_when_provided()
+        => StudentService.ComputeInitialPassword("Ahmed", studentNumber: "437079", dob: null)
+            .Should().Be("Ahm437079");
 }

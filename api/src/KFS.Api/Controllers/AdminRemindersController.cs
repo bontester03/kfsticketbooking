@@ -14,13 +14,15 @@ public class AdminRemindersController : ControllerBase
     public AdminRemindersController(IReminderService service) => _service = service;
 
     [HttpPost("unbooked")]
-    public async Task<object> SendUnbooked([FromBody] SendUnbookedReminderRequest request, CancellationToken ct)
+    public async Task<object> SendUnbooked([FromQuery] Guid eventId,
+        [FromBody] SendUnbookedReminderRequest request, CancellationToken ct)
     {
-        var sent = await _service.SendUnbookedAsync(request, ct);
+        var sent = await _service.SendUnbookedAsync(eventId, request, ct);
         return new { sent };
     }
 
     [HttpGet("logs")]
-    public Task<IReadOnlyList<ReminderLogDto>> Logs([FromQuery] int take = 100, CancellationToken ct = default)
-        => _service.ListLogsAsync(take, ct);
+    public Task<IReadOnlyList<ReminderLogDto>> Logs([FromQuery] Guid eventId,
+        [FromQuery] int take = 100, CancellationToken ct = default)
+        => _service.ListLogsAsync(eventId, take, ct);
 }

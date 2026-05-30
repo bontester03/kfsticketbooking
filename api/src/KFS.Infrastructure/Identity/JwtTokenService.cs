@@ -14,7 +14,7 @@ public class JwtTokenService : IJwtTokenService
     private readonly JwtSettings _settings;
     public JwtTokenService(IOptions<JwtSettings> options) => _settings = options.Value;
 
-    public JwtTokenPair Issue(Guid userId, UserType userType, string email, IEnumerable<string> roles)
+    public JwtTokenPair Issue(Guid userId, UserType userType, string email, IEnumerable<string> roles, Guid? eventId = null)
     {
         var accessExpiry = DateTime.UtcNow.AddMinutes(_settings.AccessTokenMinutes);
         var refreshExpiry = DateTime.UtcNow.AddDays(_settings.RefreshTokenDays);
@@ -27,6 +27,7 @@ public class JwtTokenService : IJwtTokenService
             new("typ", userType == UserType.Student ? "stu" : "adm"),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+        if (eventId.HasValue) claims.Add(new Claim("eid", eventId.Value.ToString()));
         foreach (var r in roles) claims.Add(new Claim(ClaimTypes.Role, r));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.Secret));

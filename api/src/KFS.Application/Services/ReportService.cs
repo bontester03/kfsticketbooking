@@ -18,21 +18,25 @@ public class ReportService : IReportService
         _db = db; _pdf = pdf;
     }
 
-    public async Task<GroupReportData> GetGroupReportAsync(ZoneGroup group, CancellationToken ct = default)
+    public async Task<GroupReportData> GetGroupReportAsync(Guid eventId, ZoneGroup group, CancellationToken ct = default)
     {
         if (group is not (ZoneGroup.A or ZoneGroup.B))
             throw new AppException("bad_input", "Group must be A or B.");
 
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new NotFoundException("Event", "active");
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
 
-        var femaleCode = group == ZoneGroup.A ? ZoneCode.VIPAF : ZoneCode.VIPBF;
-        var maleCode = group == ZoneGroup.A ? ZoneCode.VIPAM : ZoneCode.VIPBM;
+        // Codes for the requested group, covering both event styles:
+        //  - Boys event splits the VIP block into Female/Male zones (VIPAF / VIPAM)
+        //  - Girls event uses one block per group (VIPA / VIPB)
+        var codes = group == ZoneGroup.A
+            ? new[] { ZoneCode.VIPAF, ZoneCode.VIPAM, ZoneCode.VIPA }
+            : new[] { ZoneCode.VIPBF, ZoneCode.VIPBM, ZoneCode.VIPB };
 
         var rows = await _db.BookingItems
             .Where(bi => bi.Booking!.Status == BookingStatus.Confirmed
                          && bi.Booking.EventId == ev.Id
-                         && (bi.Zone!.Code == femaleCode || bi.Zone.Code == maleCode))
+                         && codes.Contains(bi.Zone!.Code))
             .Include(bi => bi.Booking).ThenInclude(b => b!.Student)
             .Include(bi => bi.Zone)
             .Include(bi => bi.Seat)
@@ -84,12 +88,13 @@ public class ReportService : IReportService
         return Task.FromResult(Encoding.UTF8.GetBytes(sb.ToString()));
     }
 
-    public async Task<DashboardStatsDto> GetDashboardAsync(CancellationToken ct = default)
+    public async Task<DashboardStatsDto> GetDashboardAsync(Guid eventId, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new NotFoundException("Event", "active");
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
 
-        var totalStudents = await _db.Students.CountAsync(s => s.IsActive, ct);
+        // Per-event student count.
+        var totalStudents = await _db.Students.CountAsync(s => s.IsActive && s.EventId == ev.Id, ct);
         var bookings = await _db.Bookings.Where(b => b.EventId == ev.Id)
             .GroupBy(b => b.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
 
@@ -98,7 +103,7 @@ public class ReportService : IReportService
         var loggedInProxy = await _db.RefreshTokens.Select(t => t.UserId).Distinct().CountAsync(ct);
 
         var today = DateTime.UtcNow.Date;
-        var scansToday = await _db.ScanLogs.CountAsync(s => s.ScannedAt >= today, ct);
+        var scansToday = await _db.ScanLogs.CountAsync(s => s.EventId == ev.Id && s.ScannedAt >= today, ct);
 
         var zones = await _db.Zones.Where(z => z.EventId == ev.Id).ToListAsync(ct);
         var bookingZoneCounts = await _db.BookingItems

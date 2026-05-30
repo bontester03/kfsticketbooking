@@ -33,7 +33,8 @@ public class AuthService : IAuthService
 
         return await IssueAndPersistAsync(student.Id, UserType.Student, student.Email,
             $"{student.FirstName} {student.LastName}", new[] { "Student" }, student.MustChangePassword, ct,
-            assignedGroup: student.AssignedGroup.HasValue ? (int?)student.AssignedGroup.Value : null);
+            assignedGroup: student.AssignedGroup.HasValue ? (int?)student.AssignedGroup.Value : null,
+            eventId: student.EventId);
     }
 
     public async Task<AuthResponse> AdminLoginAsync(LoginRequest request, CancellationToken ct = default)
@@ -62,13 +63,14 @@ public class AuthService : IAuthService
         // Rotate: revoke the old one, issue a new one chained via ReplacedByTokenId.
         stored.RevokedAt = DateTime.UtcNow;
 
-        string email; string name; string[] roles; bool mustChange; int? assignedGroup = null;
+        string email; string name; string[] roles; bool mustChange; int? assignedGroup = null; Guid? eventId = null;
         if (stored.UserType == UserType.Student)
         {
             var s = await _db.Students.FindAsync(new object[] { stored.UserId }, ct)
                 ?? throw new UnauthorizedException();
             email = s.Email; name = $"{s.FirstName} {s.LastName}"; roles = new[] { "Student" }; mustChange = s.MustChangePassword;
             assignedGroup = s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null;
+            eventId = s.EventId;
         }
         else
         {
@@ -77,7 +79,7 @@ public class AuthService : IAuthService
             email = a.Email; name = a.FullName; roles = new[] { "Admin" }; mustChange = a.MustChangePassword;
         }
 
-        var resp = await IssueAndPersistAsync(stored.UserId, stored.UserType, email, name, roles, mustChange, ct, replacedById: stored.Id, assignedGroup: assignedGroup);
+        var resp = await IssueAndPersistAsync(stored.UserId, stored.UserType, email, name, roles, mustChange, ct, replacedById: stored.Id, assignedGroup: assignedGroup, eventId: eventId);
         await _db.SaveChangesAsync(ct);
         return resp;
     }
@@ -143,9 +145,10 @@ public class AuthService : IAuthService
 
     private async Task<AuthResponse> IssueAndPersistAsync(
         Guid userId, UserType userType, string email, string displayName, IEnumerable<string> roles,
-        bool mustChange, CancellationToken ct, Guid? replacedById = null, int? assignedGroup = null)
+        bool mustChange, CancellationToken ct, Guid? replacedById = null, int? assignedGroup = null,
+        Guid? eventId = null)
     {
-        var pair = _jwt.Issue(userId, userType, email, roles);
+        var pair = _jwt.Issue(userId, userType, email, roles, eventId);
         _db.RefreshTokens.Add(new RefreshToken
         {
             UserId = userId,

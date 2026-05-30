@@ -13,7 +13,16 @@ public class Student : BaseEntity
     public string? StudentNumber { get; set; }
     /// <summary>Arabic / preferred display name from the school roster.</summary>
     public string? PreferredName { get; set; }
+
+    /// <summary>"Male" routes student to the Boys event; "Female" to Girls.
+    /// Required — login is blocked if missing because we can't route them.</summary>
     public string? Gender { get; set; }
+
+    /// <summary>The event this student belongs to. Resolved from Gender at import
+    /// time (Male -> Boys event, Female -> Girls event). All booking + seat
+    /// queries for this student scope to this EventId.</summary>
+    public Guid EventId { get; set; }
+    public Event? Event { get; set; }
 
     /// <summary>DOB is no longer mandatory; current rosters carry StudentNumber instead.</summary>
     public DateTime? DateOfBirth { get; set; }

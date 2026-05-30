@@ -26,9 +26,11 @@ public class AdminBookingsController : ControllerBase
     }
 
     [HttpGet("bookings")]
-    public async Task<IReadOnlyList<BookingDto>> List([FromQuery] ZoneGroup? group, [FromQuery] BookingStatus? status, CancellationToken ct)
+    public async Task<IReadOnlyList<BookingDto>> List([FromQuery] Guid eventId, [FromQuery] ZoneGroup? group,
+        [FromQuery] BookingStatus? status, CancellationToken ct)
     {
         var q = _db.Bookings
+            .Where(b => b.EventId == eventId)
             .Include(b => b.Items).ThenInclude(i => i.Zone)
             .Include(b => b.Items).ThenInclude(i => i.Seat)
             .AsQueryable();
@@ -46,12 +48,8 @@ public class AdminBookingsController : ControllerBase
     }
 
     [HttpGet("seatmap")]
-    public async Task<SeatMapDto> SeatMap([FromQuery] ZoneGroup group, CancellationToken ct)
-    {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new KFS.Application.Common.Exceptions.NotFoundException("Event", "active");
-        return await _seatMap.GetAsync(ev.Id, group, includeOccupant: true, ct);
-    }
+    public Task<SeatMapDto> SeatMap([FromQuery] Guid eventId, [FromQuery] ZoneGroup group, CancellationToken ct)
+        => _seatMap.GetAsync(eventId, group, includeOccupant: true, ct);
 
     [HttpPost("bookings/{id:guid}/force-cancel")]
     public async Task<IActionResult> ForceCancel(Guid id, CancellationToken ct)

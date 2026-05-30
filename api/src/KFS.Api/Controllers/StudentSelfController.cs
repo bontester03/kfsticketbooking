@@ -55,7 +55,7 @@ public class StudentSelfController : ControllerBase
     }
 
     [HttpGet("events/active")]
-    public Task<EventDto> ActiveEvent(CancellationToken ct) => _events.GetActiveAsync(ct);
+    public Task<EventDto> ActiveEvent(CancellationToken ct) => _events.GetForCurrentStudentAsync(ct);
 
     [HttpGet("events/{eventId:guid}/seatmap")]
     public Task<SeatMapDto> GetSeatMap(Guid eventId, [FromQuery] ZoneGroup group, CancellationToken ct)

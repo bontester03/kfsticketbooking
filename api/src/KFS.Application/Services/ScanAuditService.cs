@@ -11,14 +11,14 @@ public class ScanAuditService : IScanAuditService
     private readonly IApplicationDbContext _db;
     public ScanAuditService(IApplicationDbContext db) => _db = db;
 
-    public async Task<ScanAuditDto> GetAuditAsync(string? search, string? status, string? kind, CancellationToken ct = default)
+    public async Task<ScanAuditDto> GetAuditAsync(Guid eventId, string? search, string? status, string? kind, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
 
-        // Valid-scan aggregates per item (count + first/last time), keyed by (itemId, type).
+        // Scope scan-log aggregation to THIS event's scans.
         var scanAgg = await _db.ScanLogs
-            .Where(s => s.Result == ScanResult.Valid && s.ItemId != null)
+            .Where(s => s.EventId == ev.Id && s.Result == ScanResult.Valid && s.ItemId != null)
             .GroupBy(s => new { s.ItemId, s.ScannedItemType })
             .Select(g => new { g.Key.ItemId, g.Key.ScannedItemType, Count = g.Count(), First = g.Min(x => x.ScannedAt), Last = g.Max(x => x.ScannedAt) })
             .ToListAsync(ct);

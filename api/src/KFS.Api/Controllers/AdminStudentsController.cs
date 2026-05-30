@@ -82,10 +82,10 @@ public class AdminStudentsController : ControllerBase
         => _students.ResetPasswordAsync(id, ct);
 
     // Resets every active student to their initial password and emails each one a welcome message
-    // with their sign-in credentials and the booking instructions.
+    // with their sign-in credentials and the booking instructions. Scoped to one event.
     [HttpPost("send-welcome-emails")]
-    public Task<SendWelcomeEmailsResponseDto> SendWelcomeEmails(CancellationToken ct)
-        => _students.SendWelcomeEmailsAsync(ct);
+    public Task<SendWelcomeEmailsResponseDto> SendWelcomeEmails([FromQuery] Guid eventId, CancellationToken ct)
+        => _students.SendWelcomeEmailsAsync(eventId, ct);
 
     // Destructive: removes every student + their bookings, items, guest passes, scan logs.
     [HttpDelete]

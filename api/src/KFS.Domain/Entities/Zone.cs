@@ -15,5 +15,10 @@ public class Zone : BaseEntity
     public bool IsReservedSeating { get; set; }
     public int Capacity { get; set; }
 
+    /// <summary>Default PublicBookable. Set AdminOnly for the green emergency columns
+    /// (hidden from the student seat map) and DisplayOnly for the VVIP strip
+    /// (visible on the map but not bookable).</summary>
+    public ZoneVisibility Visibility { get; set; } = ZoneVisibility.PublicBookable;
+
     public ICollection<Seat> Seats { get; set; } = new List<Seat>();
 }

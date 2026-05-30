@@ -9,9 +9,6 @@ namespace KFS.Application.Services;
 
 public class GuestPassService : IGuestPassService
 {
-    // 1 guest ticket admits 3 people.
-    private const int GuestSeats = 3;
-
     private readonly IApplicationDbContext _db;
     private readonly IQrCodeService _qr;
     private readonly IBlobStorage _blobs;
@@ -23,25 +20,29 @@ public class GuestPassService : IGuestPassService
 
     public async Task<GuestPassDto> BookForStudentAsync(Guid studentId, Guid? issuedByAdminId, string? issuedToName, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
-
         var student = await _db.Students.FirstOrDefaultAsync(s => s.Id == studentId, ct)
             ?? throw new NotFoundException("Student", studentId);
         if (!student.IsActive) throw new AppException("inactive", "This student account is inactive.");
+
+        // Scope every check to the student's event — boys event guest pool ≠ girls.
+        var ev = await _db.Events.FindAsync(new object[] { student.EventId }, ct)
+            ?? throw new AppException("no_event", "Student is not bound to an event.");
+
+        // Each event has its own per-pass guest seat count (Boys=3, Girls=5).
+        var guestSeats = ev.GuestSeatsPerPass;
 
         var existing = await _db.AdminPasses
             .FirstOrDefaultAsync(p => p.StudentId == studentId && p.Type == AdminPassType.Guest, ct);
         if (existing != null)
             throw new AppException("already_booked", "This child already has a guest ticket.");
 
-        // Shared Guest pool: total Guest seats issued must stay within the zone capacity.
+        // Shared Guest pool — total guest seats issued for THIS event must fit in the zone capacity.
         var guestZone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == ev.Id && z.Code == ZoneCode.GUEST, ct);
         var capacity = guestZone?.Capacity ?? 0;
         var issued = await _db.AdminPasses
             .Where(p => p.EventId == ev.Id && p.Type == AdminPassType.Guest)
             .SumAsync(p => (int?)p.SeatsCount, ct) ?? 0;
-        if (issued + GuestSeats > capacity)
+        if (issued + guestSeats > capacity)
             throw new AppException("quota_exceeded",
                 $"Guest tickets are sold out — {Math.Max(0, capacity - issued)} of {capacity} seats left.");
 
@@ -54,7 +55,7 @@ public class GuestPassService : IGuestPassService
             BatchId = batchId,
             SequenceNumber = 1,
             TicketNumber = ticket,
-            SeatsCount = GuestSeats,
+            SeatsCount = guestSeats,
             StudentId = studentId,
             IssuedByAdminId = issuedByAdminId,
             IssuedToName = string.IsNullOrWhiteSpace(issuedToName)
@@ -63,7 +64,7 @@ public class GuestPassService : IGuestPassService
             IssuedAt = DateTime.UtcNow
         };
         pass.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
-            pass.Id, ev.Id, ScannedItemType.AdminPass, ZoneCode.GUEST, null, GuestSeats, ev.EventDate.AddHours(36)));
+            pass.Id, ev.Id, ScannedItemType.AdminPass, ZoneCode.GUEST, null, guestSeats, ev.EventDate.AddHours(36)));
         var png = _qr.RenderPng(pass.QrCodePayload);
         pass.QrCodeImageUrl = await _blobs.SaveAsync($"qr-codes/{ev.Id}/{ticket}.png", png, "image/png", ct);
 
@@ -85,10 +86,10 @@ public class GuestPassService : IGuestPassService
         return Map(pass, pass.Student, admitted, gate);
     }
 
-    public async Task<GuestAnalyticsDto> GetAnalyticsAsync(CancellationToken ct = default)
+    public async Task<GuestAnalyticsDto> GetAnalyticsAsync(Guid eventId, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
 
         var guestZone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == ev.Id && z.Code == ZoneCode.GUEST, ct);
         var limit = guestZone?.Capacity ?? 0;
@@ -113,9 +114,10 @@ public class GuestPassService : IGuestPassService
             passes.Count, bookedByStudents, issuedByAdminToChild, unassignedPool, admittedPeople);
     }
 
-    public async Task<IReadOnlyList<GuestEligibleStudentDto>> ListStudentsAsync(string? search, CancellationToken ct = default)
+    public async Task<IReadOnlyList<GuestEligibleStudentDto>> ListStudentsAsync(Guid eventId, string? search, CancellationToken ct = default)
     {
-        var query = _db.Students.Where(s => s.IsActive);
+        // Only students assigned to THIS event — boys-event admins don't see girls students.
+        var query = _db.Students.Where(s => s.IsActive && s.EventId == eventId);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var s = search.Trim().ToLower();

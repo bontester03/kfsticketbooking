@@ -19,15 +19,17 @@ public class AdminReportsController : ControllerBase
     public AdminReportsController(IReportService reports) => _reports = reports;
 
     [HttpGet("dashboard")]
-    public Task<DashboardStatsDto> Dashboard(CancellationToken ct) => _reports.GetDashboardAsync(ct);
+    public Task<DashboardStatsDto> Dashboard([FromQuery] Guid eventId, CancellationToken ct)
+        => _reports.GetDashboardAsync(eventId, ct);
 
     [HttpGet("group/{group}")]
-    public async Task<IActionResult> GroupReport(string group, [FromQuery] string format, CancellationToken ct)
+    public async Task<IActionResult> GroupReport(string group, [FromQuery] Guid eventId,
+        [FromQuery] string format, CancellationToken ct)
     {
         if (!Enum.TryParse<ZoneGroup>(group, true, out var g) || g is not (ZoneGroup.A or ZoneGroup.B))
             return BadRequest(new { code = "bad_input", message = "Group must be A or B." });
 
-        var data = await _reports.GetGroupReportAsync(g, ct);
+        var data = await _reports.GetGroupReportAsync(eventId, g, ct);
 
         return format.ToLowerInvariant() switch
         {

@@ -11,14 +11,27 @@ public enum BookingStatus
 
 public enum ZoneCode
 {
+    // Boys event: VIP split by side (Male/Female)
     VIPAF = 0,
     VIPAM = 1,
     VIPBF = 2,
     VIPBM = 3,
+
+    // Generic admin/display zones — used by both events
     GUEST = 4,
     STAFF = 5,
     MEDIA = 6,
-    VVIP = 7
+    VVIP = 7,
+
+    // Girls event: single-block VIPs (no side split)
+    VIPA = 8,
+    VIPB = 9,
+
+    // Boys event: hidden green emergency columns (5 seats × 4 columns)
+    EMERG_A_LEFT  = 10,
+    EMERG_A_RIGHT = 11,
+    EMERG_B_LEFT  = 12,
+    EMERG_B_RIGHT = 13
 }
 
 public enum ZoneGroup
@@ -35,18 +48,39 @@ public enum ZoneSide
     Male = 2
 }
 
+/// <summary>
+/// Controls who can see and book a Zone. Student-facing views must filter out
+/// AdminOnly zones (the green emergency columns) and show DisplayOnly zones
+/// as non-bookable (the VVIP area on the map).
+/// </summary>
+public enum ZoneVisibility
+{
+    PublicBookable = 0,   // VIP A / VIP B — students see and book
+    AdminOnly      = 1,   // Emergency green columns — hidden from students
+    DisplayOnly    = 2    // VVIP area on map — visible but not bookable
+}
+
 public enum ParentRole
 {
-    Mother = 0,
-    Father = 1
+    // Boys event: Father + Mother. Girls event: Mother + Grandmother.
+    // Index 0 = "first" seat in the pair (Mother for boys, Mother for girls).
+    // Index 1 = "second" seat in the pair (Father for boys, Grandmother for girls).
+    // The Event.PairLabel string drives the user-facing wording.
+    Mother      = 0,
+    Father      = 1,
+    Grandmother = 2
 }
 
 public enum AdminPassType
 {
-    VVIP = 0,
-    Guest = 1,
-    Staff = 2,
-    Media = 3
+    VVIP             = 0,
+    Guest            = 1,
+    Staff            = 2,
+    Media            = 3,
+    Photographer     = 4,
+    PersonalAssistant = 5,
+    Visitor          = 6,  // Boys event: grandmothers visitor row (PDF only)
+    Emergency        = 7   // Boys event: 20 green-zone emergency PDFs
 }
 
 public enum ScannedItemType
@@ -92,4 +126,14 @@ public enum PassOutputFormat
 {
     Pdf = 0,
     Zip = 1
+}
+
+/// <summary>
+/// Identifies which school an event serves. Students are routed to the event
+/// whose Gender matches their own (Student.Gender = "Male" -> Boys event).
+/// </summary>
+public enum EventGender
+{
+    Male   = 1,   // Boys school event
+    Female = 2    // Girls school event
 }

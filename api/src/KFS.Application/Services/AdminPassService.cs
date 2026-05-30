@@ -28,10 +28,11 @@ public class AdminPassService : IAdminPassService
         if (request.Count <= 0 || request.Count > 1000)
             throw new AppException("bad_input", "Count must be between 1 and 1000.");
 
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { request.EventId }, ct)
+            ?? throw new NotFoundException("Event", request.EventId);
 
-        var seatsPerCode = request.Type == AdminPassType.Guest ? 3 : 1;
+        // Guest passes admit GuestSeatsPerPass people (Boys=3, Girls=5); all other types = 1 seat per QR.
+        var seatsPerCode = request.Type == AdminPassType.Guest ? ev.GuestSeatsPerPass : 1;
         var requestedSeats = request.Count * seatsPerCode;
 
         // Enforce the per-type limit (the zone's capacity). Reject if this batch would exceed it.
@@ -111,9 +112,10 @@ public class AdminPassService : IAdminPassService
         return new GeneratePassesResponse(batchId, request.Count, downloadUrl, request.Format);
     }
 
-    public async Task<IReadOnlyList<PassBatchSummaryDto>> ListBatchesAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<PassBatchSummaryDto>> ListBatchesAsync(Guid eventId, CancellationToken ct = default)
     {
         var passes = await _db.AdminPasses
+            .Where(p => p.EventId == eventId)
             .Select(p => new { p.Id, p.BatchId, p.Type, p.SeatsCount, p.IssuedAt })
             .ToListAsync(ct);
 
@@ -131,9 +133,9 @@ public class AdminPassService : IAdminPassService
             .ToList();
     }
 
-    public async Task<IReadOnlyList<AdminPassDto>> ListPassesAsync(Guid? batchId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AdminPassDto>> ListPassesAsync(Guid eventId, Guid? batchId, CancellationToken ct = default)
     {
-        var query = _db.AdminPasses.AsQueryable();
+        var query = _db.AdminPasses.Where(p => p.EventId == eventId);
         if (batchId.HasValue) query = query.Where(p => p.BatchId == batchId.Value);
         var passes = await query.OrderBy(p => p.BatchId).ThenBy(p => p.SequenceNumber).Take(1000).ToListAsync(ct);
 
@@ -232,9 +234,9 @@ public class AdminPassService : IAdminPassService
         return (ms.ToArray(), "application/zip", $"{passes[0].Type}-{batchId}.zip");
     }
 
-    public async Task<int> DeleteAllAsync(AdminPassType? type, CancellationToken ct = default)
+    public async Task<int> DeleteAllAsync(Guid eventId, AdminPassType? type, CancellationToken ct = default)
     {
-        IQueryable<Domain.Entities.AdminPass> q = _db.AdminPasses;
+        IQueryable<Domain.Entities.AdminPass> q = _db.AdminPasses.Where(p => p.EventId == eventId);
         if (type.HasValue) q = q.Where(p => p.Type == type.Value);
         var passes = await q.ToListAsync(ct);
         if (passes.Count == 0) return 0;
@@ -267,10 +269,10 @@ public class AdminPassService : IAdminPassService
         return passes.Count;
     }
 
-    public async Task<IReadOnlyList<PassQuotaDto>> GetQuotasAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<PassQuotaDto>> GetQuotasAsync(Guid eventId, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
 
         var zones = await _db.Zones.Where(z => z.EventId == ev.Id).ToListAsync(ct);
         var issuedByType = await _db.AdminPasses
@@ -293,8 +295,8 @@ public class AdminPassService : IAdminPassService
     {
         if (request.Capacity < 0) throw new AppException("bad_input", "Limit cannot be negative.");
 
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct)
-            ?? throw new AppException("no_active_event", "No active event.");
+        var ev = await _db.Events.FindAsync(new object[] { request.EventId }, ct)
+            ?? throw new NotFoundException("Event", request.EventId);
 
         var code = ZoneCodeForType(request.Type);
         var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == ev.Id && z.Code == code, ct)
@@ -314,10 +316,13 @@ public class AdminPassService : IAdminPassService
 
     private static ZoneCode ZoneCodeForType(AdminPassType type) => type switch
     {
-        AdminPassType.VVIP  => ZoneCode.VVIP,
-        AdminPassType.Guest => ZoneCode.GUEST,
-        AdminPassType.Staff => ZoneCode.STAFF,
-        AdminPassType.Media => ZoneCode.MEDIA,
-        _ => throw new AppException("bad_input", "Unsupported pass type.")
+        AdminPassType.VVIP              => ZoneCode.VVIP,
+        AdminPassType.Guest             => ZoneCode.GUEST,
+        AdminPassType.Staff             => ZoneCode.STAFF,
+        AdminPassType.Media             => ZoneCode.MEDIA,
+        // Photographer/PersonalAssistant/Visitor/Emergency don't have dedicated zones in
+        // the current seeder — quota lives on the pass type itself in Phase 3.
+        _ => throw new AppException("bad_input",
+            $"Pass type {type} has no zone wired up yet — set its quota in Phase 3.")
     };
 }

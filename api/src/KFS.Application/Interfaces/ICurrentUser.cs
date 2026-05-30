@@ -10,4 +10,8 @@ public interface ICurrentUser
     bool IsAuthenticated { get; }
     bool IsAdmin { get; }
     bool IsStudent { get; }
+
+    /// <summary>Event the current student is bound to (from the JWT "eid" claim).
+    /// Always null for admins — they pick an event via the URL/query param instead.</summary>
+    Guid? EventId { get; }
 }

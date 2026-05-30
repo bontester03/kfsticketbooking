@@ -15,7 +15,7 @@ public interface IStudentService
     /// Returns the number of students removed.</summary>
     Task<int> DeleteAllAsync(CancellationToken ct = default);
 
-    /// <summary>Resets every active student to their initial password and (in the background)
+    /// <summary>Resets every active student of THIS event to their initial password and (in the background)
     /// emails each one a welcome message with sign-in details. Returns how many were queued.</summary>
-    Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(CancellationToken ct = default);
+    Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(Guid eventId, CancellationToken ct = default);
 }

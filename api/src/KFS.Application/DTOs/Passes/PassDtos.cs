@@ -2,7 +2,7 @@ using KFS.Domain.Enums;
 
 namespace KFS.Application.DTOs.Passes;
 
-public record GeneratePassesRequest(AdminPassType Type, int Count, PassOutputFormat Format);
+public record GeneratePassesRequest(Guid EventId, AdminPassType Type, int Count, PassOutputFormat Format);
 
 public record GeneratePassesResponse(Guid BatchId, int Count, string DownloadUrl, PassOutputFormat Format);
 
@@ -37,7 +37,7 @@ public record UpdatePassRequest(string? IssuedToName);
 // seats already generated, Remaining = Capacity - Issued.
 public record PassQuotaDto(AdminPassType Type, string Label, int Capacity, int Issued, int Remaining);
 
-public record SetPassQuotaRequest(AdminPassType Type, int Capacity);
+public record SetPassQuotaRequest(Guid EventId, AdminPassType Type, int Capacity);
 
 // A Guest ticket tied to a child (1 QR admits 3). AdmittedCount = valid scans so far.
 public record GuestPassDto(

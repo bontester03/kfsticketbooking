@@ -21,12 +21,14 @@ public class AdminGuestController : ControllerBase
     }
 
     [HttpGet("analytics")]
-    public Task<GuestAnalyticsDto> Analytics(CancellationToken ct) => _guest.GetAnalyticsAsync(ct);
+    public Task<GuestAnalyticsDto> Analytics([FromQuery] Guid eventId, CancellationToken ct)
+        => _guest.GetAnalyticsAsync(eventId, ct);
 
     // Students with a flag for whether they already hold a guest ticket.
     [HttpGet("students")]
-    public Task<IReadOnlyList<GuestEligibleStudentDto>> Students([FromQuery] string? search, CancellationToken ct)
-        => _guest.ListStudentsAsync(search, ct);
+    public Task<IReadOnlyList<GuestEligibleStudentDto>> Students([FromQuery] Guid eventId,
+        [FromQuery] string? search, CancellationToken ct)
+        => _guest.ListStudentsAsync(eventId, search, ct);
 
     // Issue the guest ticket to a child on their behalf (fails if they already have one).
     [HttpPost("issue")]

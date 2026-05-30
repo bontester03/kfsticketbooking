@@ -1,8 +1,14 @@
+using KFS.Domain.Enums;
+
 namespace KFS.Application.DTOs.Events;
 
 public record EventDto(
     Guid Id,
     string Name,
+    string Slug,
+    EventGender Gender,
+    string PairLabel,
+    int GuestSeatsPerPass,
     DateTime EventDate,
     string Venue,
     string VenueAddress,
@@ -18,6 +24,8 @@ public record EventDto(
 // Safe, aggregate event info for the pre-auth landing/sign-in banner. No PII.
 public record PublicEventDto(
     string Name,
+    string Slug,
+    EventGender Gender,
     DateTime EventDate,
     string Venue,
     string VenueAddress,

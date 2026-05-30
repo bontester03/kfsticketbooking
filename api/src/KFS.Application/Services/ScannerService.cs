@@ -20,31 +20,32 @@ public class ScannerService : IScannerService
 
     public async Task<ScanResponse> VerifyAsync(ScanRequest request, string? scannerIp, CancellationToken ct = default)
     {
-        var ev = await _db.Events.FirstOrDefaultAsync(e => e.IsActive, ct);
-        if (ev is null || string.IsNullOrEmpty(ev.ScannerToken) || ev.ScannerToken != request.EventToken)
-            return Fail(ScanResult.Invalid, "Scanner token invalid.");
+        // Each event (Boys/Girls) has its own scanner token — the URL on the iPad
+        // identifies which gate this scanner is manning.
+        var ev = await _db.Events.FirstOrDefaultAsync(e => e.ScannerToken == request.EventToken, ct);
+        if (ev is null) return Fail(ScanResult.Invalid, "Scanner token invalid.");
 
         QrPayloadDecoded payload;
         try { payload = _qr.DecodePayload(request.QrPayload); }
         catch (Exception ex)
         {
             _log.LogInformation(ex, "Invalid QR payload presented");
-            await LogAsync(ScannedItemType.BookingItem, null, ScanResult.Invalid, scannerIp, request.DeviceInfo, ct);
+            await LogAsync(ev.Id, ScannedItemType.BookingItem, null, ScanResult.Invalid, scannerIp, request.DeviceInfo, ct);
             return Fail(ScanResult.Invalid, "QR is not valid.");
         }
 
         if (payload.ExpiresAt < DateTime.UtcNow)
         {
-            await LogAsync(payload.ItemType, payload.TicketId, ScanResult.Expired, scannerIp, request.DeviceInfo, ct);
+            await LogAsync(ev.Id, payload.ItemType, payload.TicketId, ScanResult.Expired, scannerIp, request.DeviceInfo, ct);
             return Fail(ScanResult.Expired, "QR has expired.");
         }
 
         if (payload.ItemType == ScannedItemType.BookingItem)
-            return await VerifyBookingItemAsync(payload, scannerIp, request.DeviceInfo, ct);
-        return await VerifyAdminPassAsync(payload, scannerIp, request.DeviceInfo, ct);
+            return await VerifyBookingItemAsync(ev.Id, payload, scannerIp, request.DeviceInfo, ct);
+        return await VerifyAdminPassAsync(ev.Id, payload, scannerIp, request.DeviceInfo, ct);
     }
 
-    private async Task<ScanResponse> VerifyBookingItemAsync(QrPayloadDecoded payload, string? ip, string? device, CancellationToken ct)
+    private async Task<ScanResponse> VerifyBookingItemAsync(Guid eventId, QrPayloadDecoded payload, string? ip, string? device, CancellationToken ct)
     {
         var item = await _db.BookingItems
             .Include(bi => bi.Booking).ThenInclude(b => b!.Student)
@@ -54,8 +55,16 @@ public class ScannerService : IScannerService
 
         if (item is null || item.Booking!.Status != BookingStatus.Confirmed)
         {
-            await LogAsync(ScannedItemType.BookingItem, payload.TicketId, ScanResult.Invalid, ip, device, ct);
+            await LogAsync(eventId, ScannedItemType.BookingItem, payload.TicketId, ScanResult.Invalid, ip, device, ct);
             return Fail(ScanResult.Invalid, "Ticket not found or not confirmed.");
+        }
+
+        // Cross-event check: a ticket from the Boys event scanned at the Girls gate
+        // is invalid even though the QR signature is valid.
+        if (item.Booking.EventId != eventId)
+        {
+            await LogAsync(eventId, ScannedItemType.BookingItem, item.Id, ScanResult.Invalid, ip, device, ct);
+            return Fail(ScanResult.Invalid, "Ticket is for a different event.");
         }
 
         // A seat ticket admits exactly one person.
@@ -67,29 +76,35 @@ public class ScannerService : IScannerService
 
         if (firstPrior != null)
         {
-            await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.AlreadyUsed, ip, device, ct);
+            await LogAsync(eventId, ScannedItemType.BookingItem, item.Id, ScanResult.AlreadyUsed, ip, device, ct);
             return new ScanResponse(false, ScanResult.AlreadyUsed, ScannedItemType.BookingItem,
                 item.Zone!.DisplayName, item.Seat!.FullLabel, 1, 1, holder,
                 true, firstPrior.ScannedAt, $"Already scanned at {firstPrior.ScannedAt:HH:mm}.");
         }
 
-        await LogAsync(ScannedItemType.BookingItem, item.Id, ScanResult.Valid, ip, device, ct);
+        await LogAsync(eventId, ScannedItemType.BookingItem, item.Id, ScanResult.Valid, ip, device, ct);
         return new ScanResponse(true, ScanResult.Valid, ScannedItemType.BookingItem,
             item.Zone!.DisplayName, item.Seat!.FullLabel, 1, 1, holder, false, null,
             $"Welcome — {item.Zone.DisplayName}, Seat {item.Seat.FullLabel}.");
     }
 
-    private async Task<ScanResponse> VerifyAdminPassAsync(QrPayloadDecoded payload, string? ip, string? device, CancellationToken ct)
+    private async Task<ScanResponse> VerifyAdminPassAsync(Guid eventId, QrPayloadDecoded payload, string? ip, string? device, CancellationToken ct)
     {
         var pass = await _db.AdminPasses.FirstOrDefaultAsync(p => p.Id == payload.TicketId, ct);
         if (pass is null)
         {
-            await LogAsync(ScannedItemType.AdminPass, payload.TicketId, ScanResult.Invalid, ip, device, ct);
+            await LogAsync(eventId, ScannedItemType.AdminPass, payload.TicketId, ScanResult.Invalid, ip, device, ct);
             return Fail(ScanResult.Invalid, "Pass not found.");
         }
 
-        // A pass admits up to SeatsCount people (Guest = 3), one per scan. Each valid scan logs
-        // one admission; once SeatsCount admissions are used, further scans are rejected.
+        // Cross-event check: a Boys-event pass can't admit at the Girls gate.
+        if (pass.EventId != eventId)
+        {
+            await LogAsync(eventId, ScannedItemType.AdminPass, pass.Id, ScanResult.Invalid, ip, device, ct);
+            return Fail(ScanResult.Invalid, "Pass is for a different event.");
+        }
+
+        // A pass admits up to SeatsCount people (Guest = 3, or 5 for the Girls event).
         var allowed = Math.Max(1, pass.SeatsCount);
         var priorScans = await _db.ScanLogs
             .Where(s => s.ItemId == pass.Id && s.ScannedItemType == ScannedItemType.AdminPass && s.Result == ScanResult.Valid)
@@ -98,7 +113,7 @@ public class ScannerService : IScannerService
 
         if (used >= allowed)
         {
-            await LogAsync(ScannedItemType.AdminPass, pass.Id, ScanResult.AlreadyUsed, ip, device, ct);
+            await LogAsync(eventId, ScannedItemType.AdminPass, pass.Id, ScanResult.AlreadyUsed, ip, device, ct);
             var first = priorScans.First().ScannedAt;
             return new ScanResponse(false, ScanResult.AlreadyUsed, ScannedItemType.AdminPass,
                 pass.Type.ToString(), null, allowed, used, pass.IssuedToName, true, first,
@@ -107,7 +122,7 @@ public class ScannerService : IScannerService
                     : $"Already scanned at {first:HH:mm}.");
         }
 
-        await LogAsync(ScannedItemType.AdminPass, pass.Id, ScanResult.Valid, ip, device, ct);
+        await LogAsync(eventId, ScannedItemType.AdminPass, pass.Id, ScanResult.Valid, ip, device, ct);
         var admitted = used + 1;
         var remaining = allowed - admitted;
         var msg = allowed > 1
@@ -119,10 +134,11 @@ public class ScannerService : IScannerService
             null, allowed, admitted, pass.IssuedToName, false, null, msg);
     }
 
-    private async Task LogAsync(ScannedItemType type, Guid? id, ScanResult result, string? ip, string? device, CancellationToken ct)
+    private async Task LogAsync(Guid eventId, ScannedItemType type, Guid? id, ScanResult result, string? ip, string? device, CancellationToken ct)
     {
         _db.ScanLogs.Add(new ScanLog
         {
+            EventId = eventId,
             ScannedItemType = type, ItemId = id, Result = result, ScannerIp = ip, DeviceInfo = device
         });
         await _db.SaveChangesAsync(ct);
