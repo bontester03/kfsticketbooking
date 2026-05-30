@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IJwtTokenService, JwtTokenService>();
         services.AddScoped<IQrCodeService, QrCodeService>();
         services.AddScoped<IExcelStudentImporter, ExcelStudentImporter>();
+        services.AddScoped<IPassRosterImporter, ExcelPassRosterImporter>();
         services.AddScoped<IPassPdfRenderer, PassPdfRenderer>();
         services.AddScoped<ITicketEmailRenderer, TicketEmailRenderer>();
 

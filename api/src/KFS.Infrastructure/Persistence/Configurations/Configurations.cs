@@ -146,6 +146,7 @@ public class AdminPassConfiguration : IEntityTypeConfiguration<AdminPass>
         b.Property(x => x.QrCodePayload).HasMaxLength(2000).IsRequired();
         b.Property(x => x.QrCodeImageUrl).HasMaxLength(500);
         b.Property(x => x.IssuedToName).HasMaxLength(180);
+        b.Property(x => x.IssuedToEmail).HasColumnType("citext").HasMaxLength(180);
 
         b.HasOne(x => x.Event).WithMany(e => e.AdminPasses).HasForeignKey(x => x.EventId)
             .OnDelete(DeleteBehavior.Cascade);

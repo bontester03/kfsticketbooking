@@ -18,6 +18,9 @@ public class AdminPass : BaseEntity
 
     public int SeatsCount { get; set; } = 1;
     public string? IssuedToName { get; set; }
+    /// <summary>Set when the pass was generated from a staff/photographer/PA roster —
+    /// drives the fire-and-forget "your pass" email after a batch is generated.</summary>
+    public string? IssuedToEmail { get; set; }
     public Guid? IssuedByAdminId { get; set; }
 
     // Set when a pass is tied to a specific child: a student self-books a Guest ticket

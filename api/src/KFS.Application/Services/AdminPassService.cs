@@ -16,11 +16,15 @@ public class AdminPassService : IAdminPassService
     private readonly IBlobStorage _blobs;
     private readonly IPassPdfRenderer _pdf;
     private readonly ICurrentUser _currentUser;
+    private readonly IPassRosterImporter _rosterImporter;
+    private readonly IEmailService _email;
 
     public AdminPassService(IApplicationDbContext db, IQrCodeService qr, IBlobStorage blobs,
-        IPassPdfRenderer pdf, ICurrentUser currentUser)
+        IPassPdfRenderer pdf, ICurrentUser currentUser,
+        IPassRosterImporter rosterImporter, IEmailService email)
     {
         _db = db; _qr = qr; _blobs = blobs; _pdf = pdf; _currentUser = currentUser;
+        _rosterImporter = rosterImporter; _email = email;
     }
 
     public async Task<GeneratePassesResponse> GenerateBatchAsync(GeneratePassesRequest request, CancellationToken ct = default)
@@ -111,6 +115,114 @@ public class AdminPassService : IAdminPassService
 
         return new GeneratePassesResponse(batchId, request.Count, downloadUrl, request.Format);
     }
+
+    public async Task<GenerateFromRosterResponse> GenerateFromRosterAsync(
+        Guid eventId, AdminPassType type, Stream xlsxStream, CancellationToken ct = default)
+    {
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
+
+        var parsed = _rosterImporter.Parse(xlsxStream);
+        var errors = parsed.Errors.Select(e => new RosterRowErrorDto(e.RowNumber, e.Field, e.Message)).ToList();
+
+        // Skip duplicates against existing passes of this (event, type) — re-uploading
+        // a roster that overlaps shouldn't double-issue.
+        var existingEmails = await _db.AdminPasses
+            .Where(p => p.EventId == eventId && p.Type == type && p.IssuedToEmail != null)
+            .Select(p => p.IssuedToEmail!).ToListAsync(ct);
+        var existingSet = existingEmails.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var toIssue = new List<ParsedPassRosterRow>(parsed.Valid.Count);
+        var skipped = 0;
+        foreach (var r in parsed.Valid)
+        {
+            if (existingSet.Contains(r.Email)) { skipped++; continue; }
+            toIssue.Add(r);
+            existingSet.Add(r.Email);    // dedup within the same upload
+        }
+
+        // Quota check (1 seat per row for non-Guest types).
+        var zoneCode = ZoneCodeForType(type);
+        var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == eventId && z.Code == zoneCode, ct);
+        var capacity = zone?.Capacity ?? 0;
+        var alreadyIssued = await _db.AdminPasses
+            .Where(p => p.EventId == eventId && p.Type == type)
+            .SumAsync(p => (int?)p.SeatsCount, ct) ?? 0;
+        if (alreadyIssued + toIssue.Count > capacity)
+            throw new AppException("quota_exceeded",
+                $"{type} limit is {capacity}. {alreadyIssued} already issued, {Math.Max(0, capacity - alreadyIssued)} remaining — cannot add {toIssue.Count} more.");
+
+        var batchId = Guid.NewGuid();
+        var qrExpiry = ev.EventDate.AddHours(36);
+        var generated = new List<(AdminPass Pass, string Email, byte[] Png)>(toIssue.Count);
+
+        for (var i = 0; i < toIssue.Count; i++)
+        {
+            var r = toIssue[i];
+            var seq = i + 1;
+            var ticket = $"KFS-{type.ToString().ToUpper()}-{batchId.ToString("N")[..6].ToUpperInvariant()}-{seq:D3}";
+            var pass = new AdminPass
+            {
+                EventId = ev.Id,
+                Type = type,
+                BatchId = batchId,
+                SequenceNumber = seq,
+                TicketNumber = ticket,
+                SeatsCount = 1,
+                IssuedToName = r.FullName,
+                IssuedToEmail = r.Email.ToLowerInvariant(),
+                IssuedByAdminId = _currentUser.UserId,
+                IssuedAt = DateTime.UtcNow
+            };
+            pass.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
+                pass.Id, ev.Id, ScannedItemType.AdminPass, zoneCode, null, 1, qrExpiry));
+            var png = _qr.RenderPng(pass.QrCodePayload);
+            pass.QrCodeImageUrl = await _blobs.SaveAsync($"qr-codes/{ev.Id}/{ticket}.png", png, "image/png", ct);
+            _db.AdminPasses.Add(pass);
+            generated.Add((pass, r.Email, png));
+        }
+        await _db.SaveChangesAsync(ct);
+
+        // Fire-and-forget email batch. Slow / failing SMTP must not block the admin response.
+        var eventName = ev.Name;
+        var eventDate = ev.EventDate;
+        var sender = _email;
+        var typeLabel = type.ToString();
+        _ = Task.Run(async () =>
+        {
+            foreach (var (pass, email, png) in generated)
+            {
+                try
+                {
+                    var subject = $"{eventName} — your {typeLabel} pass";
+                    var html = BuildRosterEmailHtml(eventName, eventDate, typeLabel, pass.IssuedToName ?? "", pass.TicketNumber);
+                    await sender.SendAsync(new OutgoingEmail(
+                        email, subject, html,
+                        new[] { new EmailAttachment($"{pass.TicketNumber}.png", "image/png", png) }), CancellationToken.None);
+                }
+                catch { /* SmtpEmailService logs its own failures */ }
+            }
+        });
+
+        return new GenerateFromRosterResponse(
+            BatchId: batchId,
+            RowsRead: parsed.Valid.Count + parsed.Errors.Count,
+            Generated: generated.Count,
+            Skipped: skipped,
+            EmailsQueued: generated.Count,
+            Errors: errors);
+    }
+
+    private static string BuildRosterEmailHtml(string eventName, DateTime eventDate, string passType, string holderName, string ticketNo) =>
+        $@"<div style='font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#14241f'>
+  <h2 style='color:#0d3128'>{System.Net.WebUtility.HtmlEncode(eventName)}</h2>
+  <p>Hello {System.Net.WebUtility.HtmlEncode(holderName)},</p>
+  <p>Your <strong>{System.Net.WebUtility.HtmlEncode(passType)}</strong> pass is attached as a PNG.
+  Bring it on your phone (or print it) and present it at the gate on
+  <strong>{eventDate:dd MMM yyyy}</strong>.</p>
+  <p style='font-size:13px;color:#475569'>Ticket: <code>{System.Net.WebUtility.HtmlEncode(ticketNo)}</code></p>
+  <p style='font-size:12px;color:#94a3b8'>King Faisal School — Event Management</p>
+</div>";
 
     public async Task<IReadOnlyList<PassBatchSummaryDto>> ListBatchesAsync(Guid eventId, CancellationToken ct = default)
     {

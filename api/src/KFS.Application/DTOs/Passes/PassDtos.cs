@@ -39,6 +39,18 @@ public record PassQuotaDto(AdminPassType Type, string Label, int Capacity, int I
 
 public record SetPassQuotaRequest(Guid EventId, AdminPassType Type, int Capacity);
 
+/// <summary>Result of /admin/passes/from-roster — admin uploads a name+email XLSX,
+/// one QR is generated per row and emailed to each holder asynchronously.</summary>
+public record GenerateFromRosterResponse(
+    Guid BatchId,
+    int RowsRead,
+    int Generated,
+    int Skipped,
+    int EmailsQueued,
+    IReadOnlyList<RosterRowErrorDto> Errors);
+
+public record RosterRowErrorDto(int RowNumber, string Field, string Message);
+
 // A Guest ticket tied to a child (1 QR admits 3). AdmittedCount = valid scans so far.
 public record GuestPassDto(
     Guid Id,

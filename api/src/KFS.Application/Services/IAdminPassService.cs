@@ -6,6 +6,12 @@ namespace KFS.Application.Services;
 public interface IAdminPassService
 {
     Task<GeneratePassesResponse> GenerateBatchAsync(GeneratePassesRequest request, CancellationToken ct = default);
+
+    /// <summary>Generate one QR per row from a name+email XLSX roster, then email each
+    /// holder their pass (fire-and-forget). Used for Staff / Photographer / Personal
+    /// Assistant / Visitor / Emergency rosters.</summary>
+    Task<GenerateFromRosterResponse> GenerateFromRosterAsync(
+        Guid eventId, KFS.Domain.Enums.AdminPassType type, Stream xlsxStream, CancellationToken ct = default);
     /// <summary>Scoped to one event — the admin event-picker UI passes its eventId.</summary>
     Task<IReadOnlyList<PassBatchSummaryDto>> ListBatchesAsync(Guid eventId, CancellationToken ct = default);
     Task<IReadOnlyList<AdminPassDto>> ListPassesAsync(Guid eventId, Guid? batchId, CancellationToken ct = default);
