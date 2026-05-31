@@ -1,0 +1,26 @@
+# Extra paths to skip when `railway up` uploads the local dir.
+# Railway already respects .gitignore (so node_modules / bin / obj are out),
+# this file just keeps the upload tight for the multi-service monorepo deploy.
+
+.git/
+.vs/
+.vscode/
+.idea/
+.claude/
+logs/
+*.log
+*.user
+
+# Local docker compose volumes / build cache
+**/.next/
+**/dist/
+
+# Local test outputs
+TestResults/
+coverage/
+
+# Backup / temp files left by editors
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
