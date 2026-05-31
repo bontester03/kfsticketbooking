@@ -47,8 +47,18 @@ export default function CartPage() {
   }
 
   const cart = cartQ.data;
-  const mother = cart.items.find(i => i.parentRole === ParentRole.Mother);
-  const father = cart.items.find(i => i.parentRole === ParentRole.Father);
+  // Sort by ParentRole so we always render Mother first, then the partner seat
+  // (Father for boys = enum 1, Grandmother for girls = enum 2). Avoids hardcoding either.
+  const items = [...cart.items].sort((a, b) => a.parentRole - b.parentRole);
+  const mother = items.find(i => i.parentRole === ParentRole.Mother);
+
+  // Translation keys for the partner slot — falls back to Father if the key doesn't exist
+  // (older locale files won't have cart.grandmother yet).
+  const partnerLabel = (item: typeof items[number]) => {
+    if (item.parentRole === ParentRole.Mother) return t('cart.mother', { block: item.block, seat: item.fullLabel });
+    if (item.parentRole === ParentRole.Grandmother) return `Grandmother — ${item.block} · ${item.fullLabel}`;
+    return t('cart.father', { block: item.block, seat: item.fullLabel });
+  };
 
   return (
     <div className="grid gap-6">
@@ -64,13 +74,13 @@ export default function CartPage() {
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        {[mother, father].filter(Boolean).map((item) => (
-          <Card key={item!.id}>
+        {items.map((item) => (
+          <Card key={item.id}>
             <div className="text-xs uppercase tracking-wider text-kfs-sage-700">
-              {item!.parentRole === ParentRole.Mother ? t('cart.mother', { block: item!.block, seat: item!.fullLabel }) : t('cart.father', { block: item!.block, seat: item!.fullLabel })}
+              {partnerLabel(item)}
             </div>
-            <div className="mt-2 text-3xl font-bold text-kfs-forest">{item!.fullLabel}</div>
-            <div className="mt-1 text-sm text-kfs-sage-700">{item!.block}</div>
+            <div className="mt-2 text-3xl font-bold text-kfs-forest">{item.fullLabel}</div>
+            <div className="mt-1 text-sm text-kfs-sage-700">{item.block}</div>
           </Card>
         ))}
       </div>

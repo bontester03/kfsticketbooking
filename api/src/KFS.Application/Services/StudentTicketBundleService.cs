@@ -41,13 +41,23 @@ public class StudentTicketBundleService : IStudentTicketBundleService
                 b.Items.OrderBy(i => i.ParentRole)
                     .Select(i => i.Seat is null ? "" : $"{i.Seat.RowLabel}{i.Seat.SeatNumber}")
                     .Where(s => !string.IsNullOrEmpty(s)));
-            foreach (var item in b.Items.OrderBy(i => i.ParentRole))
+            // Girls bookings carry the QR on the Mother item only — render ONE PDF entry
+            // for the pair so the student doesn't see two tickets for a single QR.
+            // Boys bookings get one entry per item as before.
+            var itemsToRender = ev.Gender == EventGender.Female
+                ? b.Items.Where(i => !string.IsNullOrEmpty(i.QrCodePayload)).OrderBy(i => i.ParentRole)
+                : b.Items.OrderBy(i => i.ParentRole);
+
+            foreach (var item in itemsToRender)
             {
+                var roleLabel = ev.Gender == EventGender.Female
+                    ? ev.PairLabel
+                    : KFS.Domain.Enums.ParentRoleLabels.Label(item.ParentRole, ev.Gender);
                 seats.Add(new StudentSeatTicketEntry(
                     Group: group,
                     Row: item.Seat?.RowLabel ?? "",
                     Seat: item.Seat?.SeatNumber ?? 0,
-                    ParentRole: KFS.Domain.Enums.ParentRoleLabels.Label(item.ParentRole, ev.Gender),
+                    ParentRole: roleLabel,
                     StudentName: studentName,
                     StudentEmail: student.Email,
                     TicketNumber: item.TicketNumber,

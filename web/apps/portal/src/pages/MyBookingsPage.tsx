@@ -51,7 +51,18 @@ export default function MyBookingsPage() {
   }
 
   const groupLetter: 'A' | 'B' = confirmed.groupChosen === ZoneGroup.A ? 'A' : 'B';
-  const secondLabel = eventQ.data?.gender === EventGender.Female ? 'Grandmother' : 'Father';
+  const isGirls = eventQ.data?.gender === EventGender.Female;
+  const secondLabel = isGirls ? 'Grandmother' : 'Father';
+
+  // Girls bookings share a single QR across the Mother + Grandmother seats — only the
+  // Mother item carries the QR, so we render ONE card combining both seat labels.
+  // Boys keep two cards (one per seat / QR).
+  const cardItems = isGirls
+    ? confirmed.items.filter((i) => !!i.qrCodeImageUrl)
+    : confirmed.items;
+  const partnerSeatLabel = isGirls
+    ? confirmed.items.find((i) => !i.qrCodeImageUrl)?.fullLabel ?? ''
+    : '';
 
   return (
     <div className="flex flex-col gap-3">
@@ -82,13 +93,18 @@ export default function MyBookingsPage() {
                       [&_.ticket-category]:h-10 [&_.ticket-category]:w-12 [&_.ticket-category]:text-xl
                       [&_.ticket-qr]:h-24 [&_.ticket-qr]:w-24
                       [&_.ticket-clock]:h-7 [&_.ticket-clock]:w-7">
-        {confirmed.items.map((item) => (
+        {cardItems.map((item) => (
           <TicketCard
             key={item.id}
-            item={item}
+            item={isGirls
+              // Show both seat labels on the girls combined ticket (e.g. "A13 & A14")
+              ? { ...item, fullLabel: `${item.fullLabel} & ${partnerSeatLabel}` }
+              : item}
             studentName={displayName}
             studentEmail={studentEmail}
-            parentLabel={item.parentRole === 0 ? 'Mother' : secondLabel}
+            parentLabel={isGirls
+              ? 'Mother & Grandmother'
+              : (item.parentRole === 0 ? 'Mother' : secondLabel)}
             group={groupLetter}
           />
         ))}

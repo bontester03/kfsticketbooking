@@ -48,8 +48,6 @@ public class BookingService : IBookingService
         var studentId = RequireStudent();
         if (request.Group is not (ZoneGroup.A or ZoneGroup.B))
             throw new AppException("bad_input", "Group must be A or B.");
-        if (request.Side is not (ZoneSide.Female or ZoneSide.Male))
-            throw new AppException("bad_input", "Side must be Female or Male.");
 
         // Enforce the school's pre-assigned VIP group. A student with AssignedGroup set may only
         // book seats in that group; nulls (legacy data) keep the old "pick any" behaviour.
@@ -73,6 +71,14 @@ public class BookingService : IBookingService
             throw new ConflictException("already_booked", "You already have a confirmed booking.");
         if (existing != null && existing.Status is BookingStatus.Cart)
             throw new ConflictException("cart_exists", "Release your current cart before picking a new seat.");
+
+        // Girls event uses a single-block VIP A/B with pair-adjacency booking
+        // (Mother + Grandmother on one QR). Boys keeps the F-side / M-side mirror flow below.
+        if (ev.Gender == EventGender.Female)
+            return await SelectCartGirlsAsync(studentId, ev, request, now, ct);
+
+        if (request.Side is not (ZoneSide.Female or ZoneSide.Male))
+            throw new AppException("bad_input", "Side must be Female or Male.");
 
         var pickedZoneCode = ZoneCodeFor(request.Group, request.Side);
         var mirrorZoneCode = MirrorZoneCode(pickedZoneCode);
@@ -166,6 +172,99 @@ public class BookingService : IBookingService
         return Map(await LoadAsync(booking.Id, ct));
     }
 
+    // ---------- Girls event: 1 QR per booking covering 2 ADJACENT seats ----------
+    //
+    // Pair rule: seats are paired (1,2), (3,4), (5,6), ... — picking an odd seat locks
+    // odd+1, picking an even seat locks even−1. Same row, same zone (VIPA or VIPB; no
+    // Female/Male side split for girls).
+    //
+    // The booking still owns TWO BookingItems (one per physical seat) so the seat map
+    // shows both as taken. Only the Mother item carries a QrCodePayload — the
+    // Grandmother item has NULL QR (Postgres unique indexes treat NULLs as distinct).
+    // The scanner sees the Mother item's QR and admits up to 2 people per the event's
+    // gender (handled in ScannerService).
+    private async Task<BookingDto> SelectCartGirlsAsync(Guid studentId, Event ev,
+        CartSelectRequest request, DateTime now, CancellationToken ct)
+    {
+        var zoneCode = request.Group == ZoneGroup.A ? ZoneCode.VIPA : ZoneCode.VIPB;
+        var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == ev.Id && z.Code == zoneCode, ct)
+            ?? throw new NotFoundException("Zone", zoneCode);
+
+        // Pair the picked seat with its in-row neighbour.
+        var picked = request.SeatNumber;
+        var partner = picked % 2 == 1 ? picked + 1 : picked - 1;
+        var seatNumbers = new[] { picked, partner };
+
+        var seats = await _db.Seats
+            .Where(s => s.ZoneId == zone.Id
+                        && s.RowLabel == request.RowLabel
+                        && seatNumbers.Contains(s.SeatNumber))
+            .ToListAsync(ct);
+        if (seats.Count != 2)
+            throw new NotFoundException("Seat-pair",
+                $"{request.RowLabel}-{picked} (partner {request.RowLabel}-{partner})");
+
+        var motherSeat = seats.OrderBy(s => s.SeatNumber).First();
+        var grandmotherSeat = seats.OrderBy(s => s.SeatNumber).Last();
+        var holdExpires = now.AddMinutes(ev.CartHoldMinutes);
+
+        Booking booking = null!;
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await using var tx = await _db.BeginSerializableTransactionAsync(ct);
+
+                await _db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT 1 FROM seats WHERE id = ANY({new[] { motherSeat.Id, grandmotherSeat.Id }}) FOR UPDATE", ct);
+
+                var conflict = await _db.BookingItems
+                    .Where(bi => (bi.SeatId == motherSeat.Id || bi.SeatId == grandmotherSeat.Id)
+                                 && bi.Booking!.Status != BookingStatus.Cancelled
+                                 && bi.Booking.Status != BookingStatus.Expired
+                                 && (bi.Booking.Status == BookingStatus.Confirmed
+                                     || bi.HoldExpiresAt > now))
+                    .Select(bi => bi.SeatId).ToListAsync(ct);
+                if (conflict.Count > 0)
+                    throw new ConflictException("seat_taken",
+                        "That pair is no longer available — pick another seat.",
+                        new { zone = zoneCode.ToString(), row = request.RowLabel, seat = picked });
+
+                booking = new Booking
+                {
+                    StudentId = studentId,
+                    EventId = ev.Id,
+                    Status = BookingStatus.Cart,
+                    GroupChosen = request.Group
+                };
+                _db.Bookings.Add(booking);
+
+                _db.BookingItems.Add(NewItem(booking.Id, zone, motherSeat, ParentRole.Mother, holdExpires));
+                _db.BookingItems.Add(NewItem(booking.Id, zone, grandmotherSeat, ParentRole.Grandmother, holdExpires));
+
+                await _db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                break;
+            }
+            catch (DbUpdateException ex) when (IsSerializationFailure(ex) && attempt < maxAttempts)
+            {
+                _log.LogWarning("Postgres 40001 on girls cart-select attempt {Attempt}; retrying", attempt);
+                _db.ChangeTracker.Clear();
+            }
+            catch (PostgresException pg) when (pg.SqlState == "40001" && attempt < maxAttempts)
+            {
+                _log.LogWarning("Postgres 40001 on girls cart-select attempt {Attempt}; retrying", attempt);
+                _db.ChangeTracker.Clear();
+            }
+        }
+
+        await BroadcastAsync(ev.Id, request.Group, ZoneSide.None, motherSeat.Id, "held", ct);
+        await BroadcastAsync(ev.Id, request.Group, ZoneSide.None, grandmotherSeat.Id, "held", ct);
+
+        return Map(await LoadAsync(booking.Id, ct));
+    }
+
     public async Task ReleaseCartAsync(CancellationToken ct = default)
     {
         var studentId = RequireStudent();
@@ -201,28 +300,60 @@ public class BookingService : IBookingService
         booking.ConfirmedAt = DateTime.UtcNow;
         var qrExpiry = ev.EventDate.AddHours(36);
 
-        foreach (var item in booking.Items)
+        // QR strategy:
+        //   Boys event  → one QR per BookingItem (Mother + Father seat tickets are scanned separately).
+        //   Girls event → ONE shared QR for the booking (Mother + Grandmother seats admit on the same
+        //                 ticket). Only the Mother item carries QrCodePayload + QrCodeImageUrl + TicketNumber;
+        //                 the Grandmother item leaves them NULL, which is legal because the unique
+        //                 index on QrCodePayload treats NULLs as distinct.
+        if (ev.Gender == EventGender.Female)
         {
+            var motherItem = booking.Items.OrderBy(i => i.ParentRole).First();   // Mother (enum 0)
             var ticketNumber = NewTicketNumber();
-            item.TicketNumber = ticketNumber;
-            item.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
-                item.Id, ev.Id, ScannedItemType.BookingItem, item.Zone!.Code,
-                item.Seat!.FullLabel, 1, qrExpiry));
-
-            var png = _qr.RenderPng(item.QrCodePayload);
-            item.QrCodeImageUrl = await _blobs.SaveAsync(
+            motherItem.TicketNumber = ticketNumber;
+            motherItem.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
+                motherItem.Id, ev.Id, ScannedItemType.BookingItem, motherItem.Zone!.Code,
+                motherItem.Seat!.FullLabel, 2 /* admits 2 — handled by ScannerService */, qrExpiry));
+            var png = _qr.RenderPng(motherItem.QrCodePayload);
+            motherItem.QrCodeImageUrl = await _blobs.SaveAsync(
                 $"qr-codes/{ev.Id}/{ticketNumber}.png", png, "image/png", ct);
+            // Grandmother item: keep the same ticket number for human consistency,
+            // but no QR — admin / scanner treat the Mother item as the canonical entry point.
+            var grandmotherItem = booking.Items.OrderBy(i => i.ParentRole).Last();
+            grandmotherItem.TicketNumber = ticketNumber;
+        }
+        else
+        {
+            foreach (var item in booking.Items)
+            {
+                var ticketNumber = NewTicketNumber();
+                item.TicketNumber = ticketNumber;
+                item.QrCodePayload = _qr.EncodePayload(new QrPayloadInput(
+                    item.Id, ev.Id, ScannedItemType.BookingItem, item.Zone!.Code,
+                    item.Seat!.FullLabel, 1, qrExpiry));
+                var png = _qr.RenderPng(item.QrCodePayload);
+                item.QrCodeImageUrl = await _blobs.SaveAsync(
+                    $"qr-codes/{ev.Id}/{ticketNumber}.png", png, "image/png", ct);
+            }
         }
 
         await _db.SaveChangesAsync(ct);
 
-        // Send 2 emails — one per ticket.
-        foreach (var item in booking.Items)
+        // Email: boys → one per ticket; girls → ONE email with both seats listed + 1 QR attached.
+        var emailItems = ev.Gender == EventGender.Female
+            ? new[] { booking.Items.OrderBy(i => i.ParentRole).First() }   // only the Mother item carries the QR
+            : booking.Items.ToArray();
+
+        foreach (var item in emailItems)
         {
             var png = _qr.RenderPng(item.QrCodePayload!);
+            var parentLabel = ev.Gender == EventGender.Female
+                ? ev.PairLabel        // "Mother & Grandmother"
+                : ParentRoleLabels.Label(item.ParentRole, ev.Gender);
+
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
                 StudentEmail: student.Email,
-                ParentLabel: ParentRoleLabels.Label(item.ParentRole, ev.Gender),
+                ParentLabel: parentLabel,
                 StudentName: $"{student.FirstName} {student.LastName}",
                 TicketLast6: item.TicketNumber[^6..],
                 Group: booking.GroupChosen,
@@ -236,9 +367,11 @@ public class BookingService : IBookingService
 
             try
             {
+                var subjectLabel = ev.Gender == EventGender.Female ? "tickets (Mother & Grandmother)"
+                                                                   : $"{parentLabel} ticket";
                 var msgId = await _email.SendAsync(new OutgoingEmail(
                     student.Email,
-                    $"{ev.Name} — {ParentRoleLabels.Label(item.ParentRole, ev.Gender)} ticket",
+                    $"{ev.Name} — {subjectLabel}",
                     html,
                     new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
                 item.EmailSent = true;
@@ -247,6 +380,18 @@ public class BookingService : IBookingService
             catch (Exception ex)
             {
                 _log.LogError(ex, "Failed to send ticket email for booking item {ItemId}", item.Id);
+            }
+        }
+        // For girls, flip the Grandmother item's EmailSent flag in sync so MyBookings UI doesn't
+        // misleadingly show "email pending" for the second seat.
+        if (ev.Gender == EventGender.Female)
+        {
+            var mother = booking.Items.OrderBy(i => i.ParentRole).First();
+            var grandmother = booking.Items.OrderBy(i => i.ParentRole).Last();
+            if (mother.EmailSent)
+            {
+                grandmother.EmailSent = true;
+                grandmother.EmailSentAt = mother.EmailSentAt;
             }
         }
         await _db.SaveChangesAsync(ct);
@@ -329,20 +474,37 @@ public class BookingService : IBookingService
         var ev = await _db.Events.FindAsync(new object[] { booking.EventId }, ct)
             ?? throw new NotFoundException("Event", booking.EventId);
 
-        foreach (var item in booking.Items)
+        // Same girls vs boys logic as the initial checkout: 1 combined email for girls,
+        // one per item for boys. Only items with a non-null QrCodePayload are emailed.
+        var emailItems = ev.Gender == EventGender.Female
+            ? booking.Items.Where(i => !string.IsNullOrEmpty(i.QrCodePayload)).ToArray()
+            : booking.Items.ToArray();
+
+        foreach (var item in emailItems)
         {
             var png = _qr.RenderPng(item.QrCodePayload!);
-            var label = ParentRoleLabels.Label(item.ParentRole, ev.Gender);
+            var label = ev.Gender == EventGender.Female
+                ? ev.PairLabel
+                : ParentRoleLabels.Label(item.ParentRole, ev.Gender);
+            var subjectLabel = ev.Gender == EventGender.Female ? "tickets (Mother & Grandmother)"
+                                                                : $"{label} ticket";
             var html = _emailRenderer.RenderTicket(new TicketEmailModel(
                 student.Email, label,
                 $"{student.FirstName} {student.LastName}", item.TicketNumber[^6..],
                 booking.GroupChosen, BlockLabel(item.Zone!.Code), item.Seat!.RowLabel,
                 item.Seat.SeatNumber, ev.Name, ev.EventDate, ev.Venue, ev.MapLink), png);
             await _email.SendAsync(new OutgoingEmail(
-                student.Email, $"{ev.Name} — {label} ticket (resend)", html,
+                student.Email, $"{ev.Name} — {subjectLabel} (resend)", html,
                 new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
             item.EmailSent = true;
             item.EmailSentAt = DateTime.UtcNow;
+        }
+        // Mirror EmailSent across the pair for girls (the Grandmother item shares the QR).
+        if (ev.Gender == EventGender.Female)
+        {
+            var mother = booking.Items.OrderBy(i => i.ParentRole).First();
+            var grandmother = booking.Items.OrderBy(i => i.ParentRole).Last();
+            if (mother.EmailSent) { grandmother.EmailSent = true; grandmother.EmailSentAt = mother.EmailSentAt; }
         }
         await _db.SaveChangesAsync(ct);
     }
