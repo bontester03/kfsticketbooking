@@ -10,9 +10,10 @@ public class LocalDiskBlobStorage : IBlobStorage
 
     public LocalDiskBlobStorage(IConfiguration config)
     {
-        _root = config.GetValue<string>("Storage:LocalRoot");
-        if (string.IsNullOrWhiteSpace(_root))
-            _root = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        var root = config.GetValue<string>("Storage:LocalRoot");
+        if (string.IsNullOrWhiteSpace(root))
+            root = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        _root = root;
         _publicBase = (config.GetValue<string>("Storage:PublicBase") ?? "/static").TrimEnd('/');
         Directory.CreateDirectory(_root);
     }

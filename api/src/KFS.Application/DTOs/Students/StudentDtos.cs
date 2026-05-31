@@ -19,7 +19,14 @@ public record StudentDto(
     // 1 = VIP A, 2 = VIP B, null = not yet assigned
     int? AssignedGroup = null);
 
-public record StudentImportRowResultDto(int RowNumber, bool Imported, string? Message);
+public record StudentImportRowResultDto(
+    int RowNumber, bool Imported, string? Message,
+    // Echoed back so the admin can tell which student was rejected without
+    // having to open the XLSX side-by-side. Best-effort: empty if the row
+    // failed before the importer parsed those cells.
+    string? Email = null,
+    string? FirstName = null,
+    string? LastName = null);
 
 public record StudentImportResultDto(
     int TotalRows,

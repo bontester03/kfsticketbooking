@@ -156,6 +156,10 @@ export interface StudentImportRowResultDto {
   rowNumber: number;
   imported: boolean;
   message?: string | null;
+  /** Echoed back from the parsed row so the UI can show WHICH student was rejected. */
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
 }
 
 export interface StudentImportResultDto {

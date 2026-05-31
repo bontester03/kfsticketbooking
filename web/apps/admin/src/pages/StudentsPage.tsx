@@ -116,14 +116,46 @@ export default function StudentsPage() {
       {lastImport && (
         <Card className="border-l-4 border-l-kfs-gold">
           <p className="text-sm text-kfs-forest-700">
-            Last import: <strong>{lastImport.imported}</strong> imported, {lastImport.skipped} skipped, {lastImport.failed} failed.
+            Last import: <strong className="text-emerald-700">{lastImport.imported}</strong> imported,
+            {' '}<strong className="text-amber-700">{lastImport.skipped}</strong> skipped,
+            {' '}<strong className="text-red-700">{lastImport.failed}</strong> failed
+            {' '}(<span className="text-kfs-sage-600">{lastImport.totalRows} rows total</span>).
           </p>
           {lastImport.rowResults.filter((r) => !r.imported).length > 0 && (
-            <ul className="mt-2 max-h-40 overflow-auto text-xs text-kfs-sage-700">
-              {lastImport.rowResults.filter((r) => !r.imported).map((r) => (
-                <li key={r.rowNumber}>Row {r.rowNumber}: {r.message}</li>
-              ))}
-            </ul>
+            <details open className="mt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-kfs-forest-700">
+                Rows not imported ({lastImport.rowResults.filter((r) => !r.imported).length}) — click to collapse
+              </summary>
+              <div className="mt-2 overflow-x-auto rounded-md border border-kfs-sage-100">
+                <table className="w-full text-xs">
+                  <thead className="bg-kfs-forest-50/40 text-left uppercase tracking-wider text-kfs-sage-700">
+                    <tr>
+                      <th className="px-3 py-1.5 w-12">Row</th>
+                      <th className="px-3 py-1.5">Name</th>
+                      <th className="px-3 py-1.5">Email</th>
+                      <th className="px-3 py-1.5">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-kfs-sage-100">
+                    {lastImport.rowResults.filter((r) => !r.imported).map((r) => {
+                      const name = [r.firstName, r.lastName].filter(Boolean).join(' ');
+                      return (
+                        <tr key={r.rowNumber}>
+                          <td className="px-3 py-1.5 text-kfs-sage-600">{r.rowNumber}</td>
+                          <td className="px-3 py-1.5">{name || <span className="text-kfs-sage-500">—</span>}</td>
+                          <td className="px-3 py-1.5">{r.email || <span className="text-kfs-sage-500">—</span>}</td>
+                          <td className="px-3 py-1.5 text-red-700">{r.message}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-[11px] text-kfs-sage-600">
+                Fix the highlighted rows in Excel and re-upload — the importer dedupes by email so
+                already-imported rows will be skipped on the second run.
+              </p>
+            </details>
           )}
         </Card>
       )}

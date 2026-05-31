@@ -41,35 +41,39 @@ public class StudentService : IStudentService
         var existing = await _db.Students.Select(s => s.Email).ToListAsync(ct);
         var existingSet = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Local helper — every row-result for a parsed row echoes the row's email + name
+        // back so the UI can show "Row 4 — alex.smith@gmail.com (Alex Smith): wrong domain"
+        // instead of just a row number.
+        StudentImportRowResultDto Result(KFS.Application.Interfaces.ParsedStudentRow row, bool ok, string? msg) =>
+            new(row.RowNumber, ok, msg, row.Email, row.FirstName, row.LastName);
+
         var toAdd = new List<Student>();
         foreach (var row in parsed.Valid)
         {
-            if (!row.Email.EndsWith("@stu.kfs.sch.sa", StringComparison.OrdinalIgnoreCase))
-            {
-                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false, "Email must end with @stu.kfs.sch.sa"));
-                continue;
-            }
+            // Email-domain whitelist removed at client request (2026-05-31).
+            // Any valid-shape email is now accepted; the importer's parser already
+            // rejects malformed addresses earlier.
             if (existingSet.Contains(row.Email))
             {
-                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false, "Email already exists — skipped."));
+                rowResults.Add(Result(row, false, "Email already exists — skipped."));
                 continue;
             }
 
             var gender = (row.Gender ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(gender))
             {
-                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false, "Gender is required."));
+                rowResults.Add(Result(row, false, "Gender is required."));
                 continue;
             }
             if (gender.Equals(otherGenderText, StringComparison.OrdinalIgnoreCase))
             {
-                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false,
+                rowResults.Add(Result(row, false,
                     $"Wrong event — this row is for the {otherGenderText} event. Upload it on /admin/{(expectedGender == EventGender.Male ? "girls" : "boys")}/students instead."));
                 continue;
             }
             if (!gender.Equals(expectedGenderText, StringComparison.OrdinalIgnoreCase))
             {
-                rowResults.Add(new StudentImportRowResultDto(row.RowNumber, false,
+                rowResults.Add(Result(row, false,
                     $"Gender must be {expectedGenderText} for this event (got \"{gender}\")."));
                 continue;
             }
@@ -92,7 +96,7 @@ public class StudentService : IStudentService
                 IsActive = true
             });
             existingSet.Add(row.Email);
-            rowResults.Add(new StudentImportRowResultDto(row.RowNumber, true, null));
+            rowResults.Add(Result(row, true, null));
         }
 
         if (toAdd.Count > 0)
