@@ -90,6 +90,7 @@ services:
     networks:
       - kfs
 
+  # Nginx in the web containers now listens on 8080 (matches Railway service-port convention).
   portal:
     build:
       context: ./web
@@ -98,7 +99,7 @@ services:
     container_name: kfs-portal
     depends_on: [api]
     ports:
-      - "${PORTAL_PORT:-5173}:80"
+      - "${PORTAL_PORT:-5173}:8080"
     networks: [kfs]
 
   admin:
@@ -109,7 +110,7 @@ services:
     container_name: kfs-admin
     depends_on: [api]
     ports:
-      - "${ADMIN_PORT:-5174}:80"
+      - "${ADMIN_PORT:-5174}:8080"
     networks: [kfs]
 
   scanner:
@@ -120,7 +121,7 @@ services:
     container_name: kfs-scanner
     depends_on: [api]
     ports:
-      - "${SCANNER_PORT:-5175}:80"
+      - "${SCANNER_PORT:-5175}:8080"
     networks: [kfs]
 
 volumes:

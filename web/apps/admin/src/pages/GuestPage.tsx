@@ -25,7 +25,8 @@ export default function GuestPage() {
   // Gate-scanner deep link (tokened, no login). Scanner app default port 5175 locally;
   // override with VITE_SCANNER_URL for the deployed host.
   const viteEnv = (import.meta as unknown as { env?: Record<string, string> }).env;
-  const scannerBase = viteEnv?.VITE_SCANNER_URL ?? window.location.origin.replace(/:\d+$/, ':5175');
+  const runtimeConfig = (globalThis as unknown as { __KFS_CONFIG__?: { scannerUrl?: string } }).__KFS_CONFIG__;
+  const scannerBase = runtimeConfig?.scannerUrl || viteEnv?.VITE_SCANNER_URL || window.location.origin.replace(/:\d+$/, ':5175');
   const scannerLink = eventQ.data?.scannerToken
     ? `${scannerBase}/?token=${encodeURIComponent(eventQ.data.scannerToken)}`
     : null;

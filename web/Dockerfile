@@ -26,11 +26,15 @@ RUN rm -rf /usr/share/nginx/html/*
 # Defaults below match docker-compose (service name `api`); on Railway override
 # API_HOST=api.railway.internal as a service variable.
 COPY apps/${APP}/nginx.conf /etc/nginx/templates/default.conf.template
-ENV API_HOST=api \
+COPY docker-entrypoint.d/40-kfs-config.sh /docker-entrypoint.d/40-kfs-config.sh
+RUN chmod +x /docker-entrypoint.d/40-kfs-config.sh
+ENV PORT=8080 \
+    API_SCHEME=http \
+    API_HOST=api \
     API_PORT=8080 \
-    NGINX_ENVSUBST_FILTER=^(API_HOST|API_PORT)$
+    NGINX_ENVSUBST_FILTER=^(API_SCHEME|API_HOST|API_PORT)$
 
 COPY --from=build /repo/apps/${APP}/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+    CMD wget --quiet --tries=1 --spider http://localhost:8080/ || exit 1
