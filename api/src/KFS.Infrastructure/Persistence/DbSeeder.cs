@@ -154,29 +154,30 @@ public static class DbSeeder
         await CreateBucketZoneAsync(db, ev, ZoneCode.STAFF, "Staff Zone",        capacity: 100);
         await CreateBucketZoneAsync(db, ev, ZoneCode.MEDIA, "Media Zone",        capacity: 100);
 
-        // PDF-only quotas (boys event — per PDF page 2):
-        // 150 Photographers, 150 Personal Assistants, 50 Visitors (grandmothers), 20 Emergency green.
+        // PDF-only quotas (boys event — per client 2026-05-31):
+        // 150 Photographers, 150 Personal Assistants, 60 Visitors (grandmothers), 20 Emergency.
         await CreateBucketZoneAsync(db, ev, ZoneCode.PHOTO,      "Photographers",      capacity: 150);
         await CreateBucketZoneAsync(db, ev, ZoneCode.PASSISTANT, "Personal Assistants", capacity: 150);
-        await CreateBucketZoneAsync(db, ev, ZoneCode.VISITORS,   "Visitors",            capacity: 50);
+        await CreateBucketZoneAsync(db, ev, ZoneCode.VISITORS,   "Visitors",            capacity: 60);
         await CreateBucketZoneAsync(db, ev, ZoneCode.EMERG_PDF,  "Emergency Passes",    capacity: 20);
 
         await db.SaveChangesAsync();
     }
 
     // ---------------- Girls event zones ----------------
-    // From PDF page 3 diagram:
-    //  - VIP A & VIP B: 40 seats each, single block (no Male/Female side split).
-    //    Layout: 4 rows × 10 seats — diagram title says 40 seats (the "3 rows × 26"
-    //    is the original spec but reconciles to 40 per the title — diagram-first rule).
+    // Per client clarification (2026-05-31):
+    //  - VIP A & VIP B: 3 rows × 26 seats = 78 seats per block, single block (no side split).
+    //  - Each student books 2 ADJACENT seats with ONE QR code (Mother + Grandmother).
+    //    That means 1 booking = 2 seats consumed, 1 QR issued. Different from the boys
+    //    mirror model (1 booking = 2 seats on opposite sides, 2 QRs issued).
     //  - Guest 500, VVIP 20, Staff 100, Media 50.
-    //  - No emergency green for the girls event (text on PDF page 4 doesn't mention it).
+    //  - No emergency green, no visitors zone for the girls event.
     private static async Task SeedGirlsZonesAsync(KfsDbContext db, Event ev)
     {
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPA, "VIP A",
-            ZoneGroup.A, ZoneSide.None, rows: 4, seatsPerRow: 10);
+            ZoneGroup.A, ZoneSide.None, rows: 3, seatsPerRow: 26);
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPB, "VIP B",
-            ZoneGroup.B, ZoneSide.None, rows: 4, seatsPerRow: 10);
+            ZoneGroup.B, ZoneSide.None, rows: 3, seatsPerRow: 26);
 
         await CreateBucketZoneAsync(db, ev, ZoneCode.GUEST, "Guest Zone", capacity: 500);
         await CreateBucketZoneAsync(db, ev, ZoneCode.VVIP,  "VVIP Zone",  capacity: 20, ZoneVisibility.DisplayOnly);
