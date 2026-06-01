@@ -2,11 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ZoneCapacityDto } from '@kfs/types';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 export default function DashboardPage() {
+  const eventId = useEventContext((s) => s.eventId);
   const q = useQuery({
-    queryKey: ['admin', 'dashboard'],
+    queryKey: ['admin', 'dashboard', eventId],
     queryFn: () => api.admin.dashboard(),
+    enabled: !!eventId,
     refetchInterval: 15_000
   });
 

@@ -5,15 +5,18 @@ import { Button, Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ApiError } from '@kfs/types';
 import { formatRiyadhDate } from '@kfs/utils';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 export default function RemindersPage() {
   const qc = useQueryClient();
+  const eventId = useEventContext((s) => s.eventId);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
   const logsQ = useQuery({
-    queryKey: ['admin', 'reminderLogs'],
-    queryFn: () => api.admin.reminders.logs(100)
+    queryKey: ['admin', 'reminderLogs', eventId],
+    queryFn: () => api.admin.reminders.logs(100),
+    enabled: !!eventId
   });
 
   const sendM = useMutation({

@@ -1,20 +1,28 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button, Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ApiError, StudentDto, StudentImportResultDto } from '@kfs/types';
 import { formatRiyadhDate } from '@kfs/utils';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 export default function StudentsPage() {
   const qc = useQueryClient();
+  const eventId = useEventContext((s) => s.eventId);
+  const eventName = useEventContext((s) => s.eventName);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'' | 'active' | 'inactive'>('');
   const fileRef = useRef<HTMLInputElement>(null);
   const [lastImport, setLastImport] = useState<StudentImportResultDto | null>(null);
-
   // Multi-select: ids the admin has ticked for bulk delete.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelected(new Set());
+    setLastImport(null);
+  }, [eventId]);
+
   const toggle = (id: string, on: boolean) => setSelected((prev) => {
     const next = new Set(prev);
     if (on) next.add(id); else next.delete(id);
@@ -22,8 +30,9 @@ export default function StudentsPage() {
   });
 
   const studentsQ = useQuery({
-    queryKey: ['admin', 'students', search, status],
-    queryFn: () => api.admin.students.list(search || undefined, status || undefined)
+    queryKey: ['admin', 'students', eventId, search, status],
+    queryFn: () => api.admin.students.list(search || undefined, status || undefined),
+    enabled: !!eventId
   });
 
   const allVisibleIds = useMemo(() => (studentsQ.data ?? []).map((s) => s.id), [studentsQ.data]);
@@ -110,7 +119,7 @@ export default function StudentsPage() {
   const confirmSendWelcome = () => {
     const count = studentsQ.data?.length ?? 0;
     if (count === 0) { toast.info('No students to email.'); return; }
-    const msg = `Send welcome emails to ${count} student${count === 1 ? '' : 's'}?\n\n` +
+    const msg = `Send welcome emails to ${count} ${eventName ?? 'selected-event'} student${count === 1 ? '' : 's'}?\n\n` +
       `Every active student will have their password reset to their temporary password and receive an email with sign-in instructions.\n\n` +
       `Anyone who has already changed their password will lose that change.`;
     if (window.confirm(msg)) welcomeM.mutate();
@@ -119,7 +128,7 @@ export default function StudentsPage() {
   const confirmDeleteAll = () => {
     const count = studentsQ.data?.length ?? 0;
     if (count === 0) { toast.info('No students to delete.'); return; }
-    const msg = `Delete EVERY student?\n\nThis will permanently remove all ${count}+ student accounts AND their bookings, guest passes, and scan history.\n\nThis cannot be undone.`;
+    const msg = `Delete every ${eventName ?? 'selected-event'} student?\n\nThis will permanently remove ${count}+ student accounts in this event AND their bookings, guest passes, and scan history.\n\nThis cannot be undone.`;
     if (!window.confirm(msg)) return;
     // Second guard for a truly irreversible action.
     const typed = window.prompt('Type DELETE to confirm:');
@@ -161,8 +170,10 @@ export default function StudentsPage() {
         <strong className="text-kfs-forest">Roster format (Excel .xlsx):</strong> columns in order —
         {' '}<code>Student ID</code>, <code>First Name</code>, <code>Last Name</code>,
         {' '}<code>Preferred Name</code> (Arabic), <code>Email</code>, <code>Gender</code>,
-        {' '}<code>Grade</code>, <code>Group</code> (<em>VIP A</em> or <em>VIP B</em>).
-        First row is a header. Download the sample to get the exact layout. Each student's
+        {' '}<code>Grade</code>, <code>Group</code>. Gender accepts <code>Male</code>/<code>Female</code>,
+        <code> Boys</code>/<code>Girls</code>, or <code>1</code>/<code>2</code> where 1 = Boys and 2 = Girls.
+        Group accepts <code>VIP A</code>/<code>VIP B</code> or <code>1</code>/<code>2</code>.
+        First row is a header. Download the sample for the selected event. Each student's
         temporary password becomes <code>First3letters + StudentID</code>, e.g. <code>Ahm437079</code>.
       </Card>
 
@@ -259,6 +270,8 @@ export default function StudentsPage() {
                 </th>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Email</th>
+                <th className="px-4 py-2">Gender</th>
+                <th className="px-4 py-2">Group</th>
                 <th className="px-4 py-2">Booking</th>
                 <th className="px-4 py-2">Seats</th>
                 <th className="px-4 py-2">Status</th>
@@ -300,6 +313,8 @@ function StudentRow({ s, checked, onToggle, activeM, resetM, onDelete, deleting 
       </td>
       <td className="px-4 py-2 font-medium text-kfs-forest-700">{s.firstName} {s.lastName}</td>
       <td className="px-4 py-2 text-kfs-sage-700">{s.email}</td>
+      <td className="px-4 py-2">{s.gender ?? '—'}</td>
+      <td className="px-4 py-2">{groupLabel(s.assignedGroup)}</td>
       <td className="px-4 py-2">{s.bookingStatus ?? '—'}</td>
       <td className="px-4 py-2 font-mono text-xs text-kfs-forest-700">{s.bookedSeats ?? '—'}</td>
       <td className="px-4 py-2">
@@ -320,4 +335,10 @@ function StudentRow({ s, checked, onToggle, activeM, resetM, onDelete, deleting 
       </td>
     </tr>
   );
+}
+
+function groupLabel(group?: number | null) {
+  if (group === 1) return 'VIP A';
+  if (group === 2) return 'VIP B';
+  return '—';
 }

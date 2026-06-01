@@ -4,17 +4,20 @@ import { Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
 import type { ScanAuditRow } from '@kfs/types';
 import { formatRiyadhDate } from '@kfs/utils';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 type Status = '' | 'scanned' | 'unscanned';
 
 export default function ScansPage() {
+  const eventId = useEventContext((s) => s.eventId);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<Status>('');
   const [kind, setKind] = useState('');
 
   const q = useQuery({
-    queryKey: ['admin', 'scans', search, status, kind],
+    queryKey: ['admin', 'scans', eventId, search, status, kind],
     queryFn: () => api.admin.scans(search || undefined, status || undefined, kind || undefined),
+    enabled: !!eventId,
     refetchInterval: 15_000
   });
 

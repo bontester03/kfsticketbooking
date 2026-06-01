@@ -44,6 +44,7 @@ public static class DbSeeder
         var boys = await SeedEventAsync(db, EventGender.Male, logger);
         var girls = await SeedEventAsync(db, EventGender.Female, logger);
 
+        await NormalizeExistingStudentsAsync(db, boys, girls, logger);
         await SeedSampleStudentsAsync(db, hasher, boys, girls, logger);
     }
 
@@ -288,5 +289,53 @@ public static class DbSeeder
         await db.SaveChangesAsync();
         logger.LogInformation("Seeded {Count} sample students across both events. " +
             "Passwords follow {{First3Cap}}{{StudentNumber}}.", samples.Length);
+    }
+
+    private static async Task NormalizeExistingStudentsAsync(KfsDbContext db, Event boys, Event girls, ILogger logger)
+    {
+        var students = await db.Students.ToListAsync();
+        if (students.Count == 0) return;
+
+        var changed = 0;
+        foreach (var s in students)
+        {
+            var gender = ParseGender(s.Gender)
+                ?? (s.EventId == boys.Id ? EventGender.Male
+                    : s.EventId == girls.Id ? EventGender.Female
+                    : null);
+            if (!gender.HasValue) continue;
+
+            var expectedEventId = gender.Value == EventGender.Male ? boys.Id : girls.Id;
+            var canonicalGender = gender.Value == EventGender.Male ? "Male" : "Female";
+            var dirty = false;
+
+            if (!string.Equals(s.Gender, canonicalGender, StringComparison.Ordinal))
+            {
+                s.Gender = canonicalGender;
+                dirty = true;
+            }
+            if (s.EventId != expectedEventId)
+            {
+                s.EventId = expectedEventId;
+                dirty = true;
+            }
+            if (dirty) changed++;
+        }
+
+        if (changed == 0) return;
+        await db.SaveChangesAsync();
+        logger.LogInformation("Normalized {Count} existing student roster rows by gender/event.", changed);
+    }
+
+    private static EventGender? ParseGender(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var g = value.Trim().ToLowerInvariant().Replace(" ", "").Replace("-", "");
+        return g switch
+        {
+            "male" or "m" or "boy" or "boys" or "1" => EventGender.Male,
+            "female" or "f" or "girl" or "girls" or "2" => EventGender.Female,
+            _ => null
+        };
     }
 }

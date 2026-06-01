@@ -29,8 +29,8 @@ public class StudentService : IStudentService
         // Anything else is rejected per row with a clear message so the admin sees exactly
         // which rows were wrong instead of a silent partial import.
         var expectedGender = targetEvent.Gender;
-        var expectedGenderText = expectedGender == EventGender.Male ? "Male" : "Female";
-        var otherGenderText    = expectedGender == EventGender.Male ? "Female" : "Male";
+        var expectedGenderText = GenderText(expectedGender);
+        var otherGenderText = expectedGender == EventGender.Male ? "Female" : "Male";
 
         var parsed = _importer.Parse(xlsxStream);
 
@@ -59,22 +59,22 @@ public class StudentService : IStudentService
                 continue;
             }
 
-            var gender = (row.Gender ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(gender))
+            var parsedGender = ParseGender(row.Gender);
+            if (string.IsNullOrWhiteSpace(row.Gender))
             {
                 rowResults.Add(Result(row, false, "Gender is required."));
                 continue;
             }
-            if (gender.Equals(otherGenderText, StringComparison.OrdinalIgnoreCase))
+            if (parsedGender.HasValue && parsedGender.Value != expectedGender)
             {
                 rowResults.Add(Result(row, false,
                     $"Wrong event — this row is for the {otherGenderText} event. Upload it on /admin/{(expectedGender == EventGender.Male ? "girls" : "boys")}/students instead."));
                 continue;
             }
-            if (!gender.Equals(expectedGenderText, StringComparison.OrdinalIgnoreCase))
+            if (!parsedGender.HasValue)
             {
                 rowResults.Add(Result(row, false,
-                    $"Gender must be {expectedGenderText} for this event (got \"{gender}\")."));
+                    $"Gender must be {expectedGenderText} for this event. Accepted values: Male/Female, Boys/Girls, or 1/2."));
                 continue;
             }
 
@@ -86,7 +86,7 @@ public class StudentService : IStudentService
                 LastName = row.LastName,
                 StudentNumber = row.StudentNumber,
                 PreferredName = row.PreferredName,
-                Gender = gender,
+                Gender = expectedGenderText,
                 EventId = targetEvent.Id,
                 GradeOrClass = row.GradeOrClass,
                 AssignedGroup = row.AssignedGroup,
@@ -112,9 +112,9 @@ public class StudentService : IStudentService
             rowResults.OrderBy(r => r.RowNumber).ToList());
     }
 
-    public async Task<IReadOnlyList<StudentDto>> ListAsync(string? search, string? status, int skip, int take, CancellationToken ct = default)
+    public async Task<IReadOnlyList<StudentDto>> ListAsync(Guid eventId, string? search, string? status, int skip, int take, CancellationToken ct = default)
     {
-        var query = _db.Students.AsQueryable();
+        var query = _db.Students.Where(s => s.EventId == eventId);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var s = search.Trim().ToLower();
@@ -128,7 +128,7 @@ public class StudentService : IStudentService
 
         // Latest booking per student (with items + seats), so we can show status AND the seat labels.
         var allBookings = await _db.Bookings
-            .Where(b => ids.Contains(b.StudentId))
+            .Where(b => ids.Contains(b.StudentId) && b.EventId == eventId)
             .Include(b => b.Items).ThenInclude(i => i.Seat)
             .ToListAsync(ct);
         var latestByStudent = allBookings
@@ -151,11 +151,12 @@ public class StudentService : IStudentService
             s.StudentNumber, s.PreferredName, s.Gender, s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null)).ToList();
     }
 
-    public async Task<StudentDto> GetAsync(Guid id, CancellationToken ct = default)
+    public async Task<StudentDto> GetAsync(Guid id, Guid? eventId = null, CancellationToken ct = default)
     {
         var s = await _db.Students.FindAsync(new object[] { id }, ct)
             ?? throw new NotFoundException("Student", id);
-        var booking = await _db.Bookings.Where(b => b.StudentId == id)
+        EnsureStudentEvent(s, eventId);
+        var booking = await _db.Bookings.Where(b => b.StudentId == id && (!eventId.HasValue || b.EventId == eventId.Value))
             .OrderByDescending(b => b.CreatedAt)
             .Select(b => (BookingStatus?)b.Status).FirstOrDefaultAsync(ct);
         return new StudentDto(s.Id, s.Email, s.FirstName, s.LastName, s.DateOfBirth, s.GradeOrClass,
@@ -164,19 +165,22 @@ public class StudentService : IStudentService
             s.AssignedGroup.HasValue ? (int?)s.AssignedGroup.Value : null);
     }
 
-    public async Task<StudentDto> UpdateAsync(Guid id, UpdateStudentRequest request, CancellationToken ct = default)
+    public async Task<StudentDto> UpdateAsync(Guid id, UpdateStudentRequest request, Guid? eventId = null, CancellationToken ct = default)
     {
         var s = await _db.Students.FindAsync(new object[] { id }, ct)
             ?? throw new NotFoundException("Student", id);
+        var scopeEventId = eventId ?? request.EventId;
+        EnsureStudentEvent(s, scopeEventId);
         if (request.IsActive.HasValue) s.IsActive = request.IsActive.Value;
         await _db.SaveChangesAsync(ct);
-        return await GetAsync(id, ct);
+        return await GetAsync(id, scopeEventId, ct);
     }
 
-    public async Task<ResetPasswordResponseDto> ResetPasswordAsync(Guid id, CancellationToken ct = default)
+    public async Task<ResetPasswordResponseDto> ResetPasswordAsync(Guid id, Guid? eventId = null, CancellationToken ct = default)
     {
         var s = await _db.Students.FindAsync(new object[] { id }, ct)
             ?? throw new NotFoundException("Student", id);
+        EnsureStudentEvent(s, eventId);
         var pwd = ComputeInitialPassword(s.FirstName, s.StudentNumber, s.DateOfBirth);
         s.PasswordHash = _hasher.Hash(pwd);
         s.MustChangePassword = true;
@@ -208,16 +212,19 @@ public class StudentService : IStudentService
         return new ResetPasswordResponseDto(pwd);
     }
 
-    public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
-        DeleteManyAsync(new[] { id }, ct).ContinueWith(t =>
-        {
-            if (t.IsFaulted) throw t.Exception!.InnerException ?? t.Exception!;
-            if (t.Result == 0) throw new NotFoundException("Student", id);
-        }, ct);
-
-    public async Task<int> DeleteManyAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    public async Task DeleteAsync(Guid id, Guid? eventId = null, CancellationToken ct = default)
     {
-        var idSet = ids.Distinct().ToList();
+        var deleted = await DeleteManyAsync(new[] { id }, eventId, ct);
+        if (deleted == 0) throw new NotFoundException("Student", id);
+    }
+
+    public async Task<int> DeleteManyAsync(IEnumerable<Guid> ids, Guid? eventId = null, CancellationToken ct = default)
+    {
+        var requestedIds = ids.Distinct().ToList();
+        var idSet = await _db.Students
+            .Where(s => requestedIds.Contains(s.Id) && (!eventId.HasValue || s.EventId == eventId.Value))
+            .Select(s => s.Id)
+            .ToListAsync(ct);
         if (idSet.Count == 0) return 0;
 
         // FK-safe cascade for the targeted students only. Same order as DeleteAllAsync,
@@ -264,47 +271,13 @@ public class StudentService : IStudentService
         return count;
     }
 
-    public async Task<int> DeleteAllAsync(CancellationToken ct = default)
+    public async Task<int> DeleteAllAsync(Guid eventId, CancellationToken ct = default)
     {
-        // FK-safe order: scans referencing student tickets → booking items → bookings →
-        // student-linked admin passes (+ their scans) → password resets → students.
-        var bookingIds = await _db.Bookings.Select(b => b.Id).ToListAsync(ct);
-        if (bookingIds.Count > 0)
-        {
-            var itemIds = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId)).Select(bi => bi.Id).ToListAsync(ct);
-            if (itemIds.Count > 0)
-            {
-                var seatScans = await _db.ScanLogs
-                    .Where(s => s.ScannedItemType == ScannedItemType.BookingItem && s.ItemId != null && itemIds.Contains(s.ItemId.Value))
-                    .ToListAsync(ct);
-                if (seatScans.Count > 0) _db.ScanLogs.RemoveRange(seatScans);
-                var items = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId)).ToListAsync(ct);
-                _db.BookingItems.RemoveRange(items);
-            }
-            var bookings = await _db.Bookings.ToListAsync(ct);
-            _db.Bookings.RemoveRange(bookings);
-        }
-
-        var studentPasses = await _db.AdminPasses.Where(p => p.StudentId != null).ToListAsync(ct);
-        if (studentPasses.Count > 0)
-        {
-            var passIds = studentPasses.Select(p => p.Id).ToList();
-            var passScans = await _db.ScanLogs
-                .Where(s => s.ScannedItemType == ScannedItemType.AdminPass && s.ItemId != null && passIds.Contains(s.ItemId.Value))
-                .ToListAsync(ct);
-            if (passScans.Count > 0) _db.ScanLogs.RemoveRange(passScans);
-            _db.AdminPasses.RemoveRange(studentPasses);
-        }
-
-        var resets = await _db.PasswordResets.ToListAsync(ct);
-        if (resets.Count > 0) _db.PasswordResets.RemoveRange(resets);
-
-        var students = await _db.Students.ToListAsync(ct);
-        var count = students.Count;
-        _db.Students.RemoveRange(students);
-
-        await _db.SaveChangesAsync(ct);
-        return count;
+        var ids = await _db.Students
+            .Where(s => s.EventId == eventId)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+        return await DeleteManyAsync(ids, eventId, ct);
     }
 
     public async Task<SendWelcomeEmailsResponseDto> SendWelcomeEmailsAsync(Guid eventId, CancellationToken ct = default)
@@ -352,6 +325,27 @@ public class StudentService : IStudentService
 
         return new SendWelcomeEmailsResponseDto(students.Count, students.Count);
     }
+
+    private static void EnsureStudentEvent(Student student, Guid? eventId)
+    {
+        if (eventId.HasValue && student.EventId != eventId.Value)
+            throw new NotFoundException("Student", student.Id);
+    }
+
+    private static EventGender? ParseGender(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var g = value.Trim().ToLowerInvariant().Replace(" ", "").Replace("-", "");
+        return g switch
+        {
+            "male" or "m" or "boy" or "boys" or "1" => EventGender.Male,
+            "female" or "f" or "girl" or "girls" or "2" => EventGender.Female,
+            _ => null
+        };
+    }
+
+    private static string GenderText(EventGender gender) =>
+        gender == EventGender.Male ? "Male" : "Female";
 
     private static string BuildWelcomeHtml(string eventName, string firstName, string email, string pwd, string portalUrl, bool includeLogo)
     {

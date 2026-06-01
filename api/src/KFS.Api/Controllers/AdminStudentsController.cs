@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using KFS.Application.DTOs.Students;
 using KFS.Application.Services;
+using KFS.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,12 @@ namespace KFS.Api.Controllers;
 public class AdminStudentsController : ControllerBase
 {
     private readonly IStudentService _students;
-    public AdminStudentsController(IStudentService students) => _students = students;
+    private readonly IEventService _events;
+    public AdminStudentsController(IStudentService students, IEventService events)
+    {
+        _students = students;
+        _events = events;
+    }
 
     // Scoped to one event — rows whose Gender doesn't match get rejected with a per-row
     // error. Prevents silent cross-event imports (an XLSX for Girls uploaded on the Boys
@@ -28,15 +34,27 @@ public class AdminStudentsController : ControllerBase
 
     // Downloadable Excel template so admins know exactly which columns to fill in.
     [HttpGet("sample")]
-    public IActionResult Sample()
+    public async Task<IActionResult> Sample([FromQuery] Guid? eventId, CancellationToken ct)
     {
+        var gender = EventGender.Male;
+        if (eventId.HasValue)
+        {
+            var ev = await _events.GetByIdAsync(eventId.Value, ct);
+            gender = ev.Gender;
+        }
+        var isBoys = gender == EventGender.Male;
+        var genderText = isBoys ? "Male" : "Female";
+        var genderCode = isBoys ? "1" : "2";
+        var genderWord = isBoys ? "Boys" : "Girls";
+
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("Students");
 
         var headers = new[]
         {
             "Student ID", "First Name", "Last Name", "Preferred Name",
-            "Email", "Gender", "Grade", "Group (VIP A / VIP B)"
+            "Email", "Gender (Male/Female or 1=Boys, 2=Girls)", "Grade",
+            "Group (VIP A/VIP B or 1=A, 2=B)"
         };
         for (var c = 0; c < headers.Length; c++)
         {
@@ -53,6 +71,20 @@ public class AdminStudentsController : ControllerBase
             new[] { "433005", "Ibrahim", "Alibrahim", "إبراهيم أسامة",       "ibrahim.alibrahim@stu.kfs.sch.sa", "Male", "Grade 12", "VIP A" },
             new[] { "433098", "Talal",   "Alsaud",    "طلال بندر سعد",        "talal.alsaud@stu.kfs.sch.sa",      "Male", "Grade 12", "VIP B" }
         };
+        examples = isBoys
+            ? new[]
+            {
+                new[] { "437079", "Ahmed",  "Almudaihem", "", "ahmed.almudaihem@stu.kfs.sch.sa", genderText, "Grade 12", "VIP A" },
+                new[] { "433005", "Ibrahim", "Alibrahim", "", "ibrahim.alibrahim@stu.kfs.sch.sa", genderCode, "Grade 12", "1" },
+                new[] { "433098", "Talal",   "Alsaud",    "", "talal.alsaud@stu.kfs.sch.sa", genderWord, "Grade 12", "2" }
+            }
+            : new[]
+            {
+                new[] { "537079", "Safa",  "Albuhairan", "", "safa.albuhairan@stu.kfs.sch.sa", genderText, "Grade 12", "VIP A" },
+                new[] { "533005", "Layan", "Alqahtani",  "", "layan.alqahtani@stu.kfs.sch.sa", genderCode, "Grade 12", "1" },
+                new[] { "533098", "Reem",  "Alotaibi",   "", "reem.alotaibi@stu.kfs.sch.sa", genderWord, "Grade 12", "2" }
+            };
+
         for (var r = 0; r < examples.Length; r++)
             for (var c = 0; c < examples[r].Length; c++)
                 ws.Cell(r + 2, c + 1).Value = examples[r][c];
@@ -69,20 +101,20 @@ public class AdminStudentsController : ControllerBase
     }
 
     [HttpGet]
-    public Task<IReadOnlyList<StudentDto>> List([FromQuery] string? search, [FromQuery] string? status,
+    public Task<IReadOnlyList<StudentDto>> List([FromQuery] Guid eventId, [FromQuery] string? search, [FromQuery] string? status,
         [FromQuery] int skip = 0, [FromQuery] int take = 50, CancellationToken ct = default)
-        => _students.ListAsync(search, status, skip, take, ct);
+        => _students.ListAsync(eventId, search, status, skip, take, ct);
 
     [HttpGet("{id:guid}")]
-    public Task<StudentDto> Get(Guid id, CancellationToken ct) => _students.GetAsync(id, ct);
+    public Task<StudentDto> Get(Guid id, [FromQuery] Guid? eventId, CancellationToken ct) => _students.GetAsync(id, eventId, ct);
 
     [HttpPatch("{id:guid}")]
-    public Task<StudentDto> Update(Guid id, [FromBody] UpdateStudentRequest request, CancellationToken ct)
-        => _students.UpdateAsync(id, request, ct);
+    public Task<StudentDto> Update(Guid id, [FromQuery] Guid? eventId, [FromBody] UpdateStudentRequest request, CancellationToken ct)
+        => _students.UpdateAsync(id, request, eventId ?? request.EventId, ct);
 
     [HttpPost("{id:guid}/reset-password")]
-    public Task<ResetPasswordResponseDto> ResetPassword(Guid id, CancellationToken ct)
-        => _students.ResetPasswordAsync(id, ct);
+    public Task<ResetPasswordResponseDto> ResetPassword(Guid id, [FromQuery] Guid? eventId, CancellationToken ct)
+        => _students.ResetPasswordAsync(id, eventId, ct);
 
     // Resets every active student to their initial password and emails each one a welcome message
     // with their sign-in credentials and the booking instructions. Scoped to one event.
@@ -92,27 +124,27 @@ public class AdminStudentsController : ControllerBase
 
     // Destructive: removes every student + their bookings, items, guest passes, scan logs.
     [HttpDelete]
-    public async Task<IActionResult> DeleteAll(CancellationToken ct)
+    public async Task<IActionResult> DeleteAll([FromQuery] Guid eventId, CancellationToken ct)
     {
-        var deleted = await _students.DeleteAllAsync(ct);
+        var deleted = await _students.DeleteAllAsync(eventId, ct);
         return Ok(new { deleted });
     }
 
     // Delete one student (FK-safe cascade — booking items + scans + their admin passes too).
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Delete(Guid id, [FromQuery] Guid? eventId, CancellationToken ct)
     {
-        await _students.DeleteAsync(id, ct);
+        await _students.DeleteAsync(id, eventId, ct);
         return Ok(new { deleted = 1 });
     }
 
     // Bulk delete N students by id. Body: { "ids": ["...", "..."] }.
     [HttpPost("delete-many")]
-    public async Task<IActionResult> DeleteMany([FromBody] DeleteManyRequest request, CancellationToken ct)
+    public async Task<IActionResult> DeleteMany([FromQuery] Guid? eventId, [FromBody] DeleteManyRequest request, CancellationToken ct)
     {
-        var deleted = await _students.DeleteManyAsync(request.Ids ?? Array.Empty<Guid>(), ct);
+        var deleted = await _students.DeleteManyAsync(request.Ids ?? Array.Empty<Guid>(), eventId ?? request.EventId, ct);
         return Ok(new { deleted });
     }
 
-    public record DeleteManyRequest(Guid[]? Ids);
+    public record DeleteManyRequest(Guid[]? Ids, Guid? EventId = null);
 }

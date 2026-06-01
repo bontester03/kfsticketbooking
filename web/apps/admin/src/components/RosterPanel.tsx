@@ -6,6 +6,7 @@ import type {
   AdminPassDto, AdminPassType as PassTypeT, ApiError, RosterPreviewDto
 } from '@kfs/types';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 // Per-type label (matches PassesPage TYPE_NAME).
 const LABEL: Record<number, string> = {
@@ -30,6 +31,7 @@ interface Props {
  */
 export function RosterPanel({ type }: Props) {
   const qc = useQueryClient();
+  const eventId = useEventContext((s) => s.eventId);
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<RosterPreviewDto | null>(null);
@@ -37,9 +39,9 @@ export function RosterPanel({ type }: Props) {
 
   // List of passes for the current batch — drives the per-row Sent / Resend UI.
   const passesQ = useQuery({
-    queryKey: ['admin', 'roster', 'batch', batchId],
+    queryKey: ['admin', 'roster', 'batch', eventId, batchId],
     queryFn: () => api.admin.passes.list(batchId!),
-    enabled: !!batchId,
+    enabled: !!eventId && !!batchId,
     refetchInterval: batchId ? 5_000 : false
   });
 

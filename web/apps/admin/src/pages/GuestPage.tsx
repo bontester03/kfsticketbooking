@@ -17,8 +17,9 @@ export default function GuestPage() {
     enabled: !!eventId
   });
   const analyticsQ = useQuery({
-    queryKey: ['admin', 'guestAnalytics'],
+    queryKey: ['admin', 'guestAnalytics', eventId],
     queryFn: () => api.admin.guest.analytics(),
+    enabled: !!eventId,
     refetchInterval: 15_000
   });
 
@@ -31,8 +32,9 @@ export default function GuestPage() {
     ? `${scannerBase}/?token=${encodeURIComponent(eventQ.data.scannerToken)}`
     : null;
   const studentsQ = useQuery({
-    queryKey: ['admin', 'guestStudents', search],
-    queryFn: () => api.admin.guest.students(search || undefined)
+    queryKey: ['admin', 'guestStudents', eventId, search],
+    queryFn: () => api.admin.guest.students(search || undefined),
+    enabled: !!eventId
   });
 
   const issue = useMutation({

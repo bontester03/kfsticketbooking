@@ -7,6 +7,7 @@ import type { ApiError, AdminPassType as PassTypeT, PassBatchSummaryDto, PassQuo
 import { formatRiyadhDate } from '@kfs/utils';
 import { api } from '../api';
 import { RosterPanel } from '../components/RosterPanel';
+import { useEventContext } from '../lib/eventContext';
 
 // Pass types that have a named holder + email address (driven by a roster upload).
 // VVIP / Guest fall outside this — VVIP is a pool of anonymous QRs and Guest is
@@ -22,6 +23,7 @@ const ROSTER_TYPE_OPTIONS: { value: PassTypeT; label: string }[] = [
 ];
 
 function RosterPanelWithTypePicker() {
+  const eventId = useEventContext((s) => s.eventId);
   const [rosterType, setRosterType] = useState<PassTypeT>(AdminPassType.Staff);
   return (
     <div className="flex flex-col gap-3">
@@ -32,7 +34,7 @@ function RosterPanelWithTypePicker() {
           {ROSTER_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
-      <RosterPanel key={rosterType} type={rosterType} />
+      <RosterPanel key={`${eventId ?? 'none'}-${rosterType}`} type={rosterType} />
     </div>
   );
 }
@@ -55,6 +57,7 @@ const TYPE_NAME = [
 
 export default function PassesPage() {
   const qc = useQueryClient();
+  const eventId = useEventContext((s) => s.eventId);
   const [type, setType] = useState<PassTypeT>(AdminPassType.Guest);
   const [count, setCount] = useState(10);
   const [format, setFormat] = useState<0 | 1>(PassOutputFormat.Pdf);
@@ -62,19 +65,21 @@ export default function PassesPage() {
   const [filterType, setFilterType] = useState<PassTypeT | 'all'>('all');
 
   const quotaQ = useQuery({
-    queryKey: ['admin', 'passQuota'],
-    queryFn: () => api.admin.passes.quota()
+    queryKey: ['admin', 'passQuota', eventId],
+    queryFn: () => api.admin.passes.quota(),
+    enabled: !!eventId
   });
 
   const batchesQ = useQuery({
-    queryKey: ['admin', 'passBatches'],
-    queryFn: () => api.admin.passes.batches()
+    queryKey: ['admin', 'passBatches', eventId],
+    queryFn: () => api.admin.passes.batches(),
+    enabled: !!eventId
   });
 
   const previewQ = useQuery({
-    queryKey: ['admin', 'passes', previewBatch],
+    queryKey: ['admin', 'passes', eventId, previewBatch],
     queryFn: () => api.admin.passes.list(previewBatch!),
-    enabled: !!previewBatch
+    enabled: !!eventId && !!previewBatch
   });
 
   // Selecting a pass type to generate also filters the batches table to that type.

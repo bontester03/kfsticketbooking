@@ -35,7 +35,7 @@ public record StudentImportResultDto(
     int Failed,
     IReadOnlyList<StudentImportRowResultDto> RowResults);
 
-public record UpdateStudentRequest(bool? IsActive);
+public record UpdateStudentRequest(bool? IsActive, Guid? EventId = null);
 
 public record ResetPasswordResponseDto(string GeneratedPassword);
 

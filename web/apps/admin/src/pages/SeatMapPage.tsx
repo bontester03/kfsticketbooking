@@ -2,16 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, LoadingPanel, EmptyState, VenueMap } from '@kfs/ui';
 import { ZoneGroup } from '@kfs/types';
 import { api } from '../api';
+import { useEventContext } from '../lib/eventContext';
 
 export default function SeatMapPage() {
+  const eventId = useEventContext((s) => s.eventId);
   const groupAQ = useQuery({
-    queryKey: ['admin', 'seatmap', 'A'],
+    queryKey: ['admin', 'seatmap', eventId, 'A'],
     queryFn: () => api.admin.seatMap(ZoneGroup.A),
+    enabled: !!eventId,
     refetchInterval: 10_000
   });
   const groupBQ = useQuery({
-    queryKey: ['admin', 'seatmap', 'B'],
+    queryKey: ['admin', 'seatmap', eventId, 'B'],
     queryFn: () => api.admin.seatMap(ZoneGroup.B),
+    enabled: !!eventId,
     refetchInterval: 10_000
   });
 
