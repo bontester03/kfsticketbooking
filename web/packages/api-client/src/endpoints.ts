@@ -116,6 +116,10 @@ export const endpoints = {
         c.post<ResetPasswordResponseDto>(`/admin/students/${id}/reset-password`).then(r => r.data),
       deleteAll: () =>
         c.delete<{ deleted: number }>('/admin/students').then(r => r.data),
+      delete: (id: string) =>
+        c.delete<{ deleted: number }>(`/admin/students/${id}`).then(r => r.data),
+      deleteMany: (ids: string[]) =>
+        c.post<{ deleted: number }>('/admin/students/delete-many', { ids }).then(r => r.data),
       sendWelcomeEmails: () =>
         c.post<{ total: number; queued: number }>('/admin/students/send-welcome-emails').then(r => r.data)
     },

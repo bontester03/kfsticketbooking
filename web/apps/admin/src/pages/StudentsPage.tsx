@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button, Card, Input, LoadingPanel, EmptyState } from '@kfs/ui';
@@ -13,12 +13,34 @@ export default function StudentsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [lastImport, setLastImport] = useState<StudentImportResultDto | null>(null);
 
+  // Multi-select: ids the admin has ticked for bulk delete.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggle = (id: string, on: boolean) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
+
   const studentsQ = useQuery({
     queryKey: ['admin', 'students', search, status],
     queryFn: () => api.admin.students.list(search || undefined, status || undefined)
   });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'students'] });
+  const allVisibleIds = useMemo(() => (studentsQ.data ?? []).map((s) => s.id), [studentsQ.data]);
+  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selected.has(id));
+  const someSelected = allVisibleIds.some((id) => selected.has(id));
+
+  const toggleAll = (on: boolean) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (on) allVisibleIds.forEach((id) => next.add(id));
+    else    allVisibleIds.forEach((id) => next.delete(id));
+    return next;
+  });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'students'] });
+    setSelected(new Set());
+  };
 
   const uploadM = useMutation({
     mutationFn: (file: File) => api.admin.students.upload(file),
@@ -53,6 +75,37 @@ export default function StudentsPage() {
     onSuccess: (res) => { toast.success(`Welcome emails queued for ${res.queued} students.`); invalidate(); },
     onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Send failed.')
   });
+
+  const deleteOneM = useMutation({
+    mutationFn: (id: string) => api.admin.students.delete(id),
+    onSuccess: (res) => { toast.success(`Deleted ${res.deleted} student.`); invalidate(); },
+    onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Delete failed.')
+  });
+
+  const deleteManyM = useMutation({
+    mutationFn: (ids: string[]) => api.admin.students.deleteMany(ids),
+    onSuccess: (res) => { toast.success(`Deleted ${res.deleted} students.`); invalidate(); },
+    onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Bulk delete failed.')
+  });
+
+  const confirmDeleteOne = (s: StudentDto) => {
+    if (!window.confirm(
+      `Delete ${s.firstName} ${s.lastName}?\n\n` +
+      `This permanently removes their account AND any bookings, guest passes and scan history. ` +
+      `Cannot be undone.`
+    )) return;
+    deleteOneM.mutate(s.id);
+  };
+
+  const confirmDeleteSelected = () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) { toast.info('Tick at least one student to delete.'); return; }
+    if (!window.confirm(
+      `Delete ${ids.length} selected student${ids.length === 1 ? '' : 's'}?\n\n` +
+      `Their bookings, guest passes and scan history go too. Cannot be undone.`
+    )) return;
+    deleteManyM.mutate(ids);
+  };
 
   const confirmSendWelcome = () => {
     const count = studentsQ.data?.length ?? 0;
@@ -182,9 +235,28 @@ export default function StudentsPage() {
         <EmptyState title="No students found" description="Adjust your search, or upload a roster to get started." />
       ) : (
         <Card className="overflow-x-auto p-0">
+          {/* Bulk-action toolbar appears as soon as anything is selected. */}
+          {someSelected && (
+            <div className="flex items-center justify-between gap-2 border-b border-kfs-sage-100 bg-kfs-forest-50/40 px-4 py-2 text-sm">
+              <span className="text-kfs-forest-700">
+                <strong>{Array.from(selected).filter((id) => allVisibleIds.includes(id)).length}</strong> selected
+              </span>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
+                <Button variant="danger" loading={deleteManyM.isPending} onClick={confirmDeleteSelected}>
+                  Delete selected
+                </Button>
+              </div>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-kfs-sage-100 text-left text-xs uppercase tracking-wide text-kfs-sage-600">
+                <th className="px-3 py-2 w-10">
+                  <input type="checkbox" aria-label="Select all"
+                         checked={allSelected}
+                         onChange={(e) => toggleAll(e.target.checked)} />
+                </th>
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Email</th>
                 <th className="px-4 py-2">Booking</th>
@@ -195,7 +267,14 @@ export default function StudentsPage() {
               </tr>
             </thead>
             <tbody>
-              {studentsQ.data.map((s) => <StudentRow key={s.id} s={s} activeM={activeM} resetM={resetM} />)}
+              {studentsQ.data.map((s) =>
+                <StudentRow key={s.id} s={s}
+                            checked={selected.has(s.id)}
+                            onToggle={(on) => toggle(s.id, on)}
+                            activeM={activeM} resetM={resetM}
+                            onDelete={() => confirmDeleteOne(s)}
+                            deleting={deleteOneM.isPending} />
+              )}
             </tbody>
           </table>
         </Card>
@@ -204,13 +283,21 @@ export default function StudentsPage() {
   );
 }
 
-function StudentRow({ s, activeM, resetM }: {
+function StudentRow({ s, checked, onToggle, activeM, resetM, onDelete, deleting }: {
   s: StudentDto;
+  checked: boolean;
+  onToggle: (on: boolean) => void;
   activeM: { mutate: (v: { id: string; isActive: boolean }) => void; isPending: boolean };
   resetM: { mutate: (id: string) => void; isPending: boolean };
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   return (
     <tr className="border-b border-kfs-sage-50 last:border-0">
+      <td className="px-3 py-2">
+        <input type="checkbox" aria-label={`Select ${s.firstName} ${s.lastName}`}
+               checked={checked} onChange={(e) => onToggle(e.target.checked)} />
+      </td>
       <td className="px-4 py-2 font-medium text-kfs-forest-700">{s.firstName} {s.lastName}</td>
       <td className="px-4 py-2 text-kfs-sage-700">{s.email}</td>
       <td className="px-4 py-2">{s.bookingStatus ?? '—'}</td>
@@ -224,10 +311,11 @@ function StudentRow({ s, activeM, resetM }: {
       <td className="px-4 py-2">
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => resetM.mutate(s.id)}>Reset password</Button>
-          <Button variant={s.isActive ? 'danger' : 'secondary'}
+          <Button variant={s.isActive ? 'secondary' : 'secondary'}
                   onClick={() => activeM.mutate({ id: s.id, isActive: !s.isActive })}>
             {s.isActive ? 'Deactivate' : 'Activate'}
           </Button>
+          <Button variant="danger" loading={deleting} onClick={onDelete}>Delete</Button>
         </div>
       </td>
     </tr>

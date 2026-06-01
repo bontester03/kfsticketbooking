@@ -208,6 +208,62 @@ public class StudentService : IStudentService
         return new ResetPasswordResponseDto(pwd);
     }
 
+    public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
+        DeleteManyAsync(new[] { id }, ct).ContinueWith(t =>
+        {
+            if (t.IsFaulted) throw t.Exception!.InnerException ?? t.Exception!;
+            if (t.Result == 0) throw new NotFoundException("Student", id);
+        }, ct);
+
+    public async Task<int> DeleteManyAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    {
+        var idSet = ids.Distinct().ToList();
+        if (idSet.Count == 0) return 0;
+
+        // FK-safe cascade for the targeted students only. Same order as DeleteAllAsync,
+        // but every step is scoped by StudentId / BookingId set.
+        var bookingIds = await _db.Bookings.Where(b => idSet.Contains(b.StudentId))
+                                            .Select(b => b.Id).ToListAsync(ct);
+        if (bookingIds.Count > 0)
+        {
+            var itemIds = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId))
+                                                .Select(bi => bi.Id).ToListAsync(ct);
+            if (itemIds.Count > 0)
+            {
+                var seatScans = await _db.ScanLogs
+                    .Where(s => s.ScannedItemType == ScannedItemType.BookingItem && s.ItemId != null && itemIds.Contains(s.ItemId.Value))
+                    .ToListAsync(ct);
+                if (seatScans.Count > 0) _db.ScanLogs.RemoveRange(seatScans);
+                var items = await _db.BookingItems.Where(bi => bookingIds.Contains(bi.BookingId)).ToListAsync(ct);
+                _db.BookingItems.RemoveRange(items);
+            }
+            var bookings = await _db.Bookings.Where(b => idSet.Contains(b.StudentId)).ToListAsync(ct);
+            _db.Bookings.RemoveRange(bookings);
+        }
+
+        var studentPasses = await _db.AdminPasses.Where(p => p.StudentId != null && idSet.Contains(p.StudentId.Value))
+                                                  .ToListAsync(ct);
+        if (studentPasses.Count > 0)
+        {
+            var passIds = studentPasses.Select(p => p.Id).ToList();
+            var passScans = await _db.ScanLogs
+                .Where(s => s.ScannedItemType == ScannedItemType.AdminPass && s.ItemId != null && passIds.Contains(s.ItemId.Value))
+                .ToListAsync(ct);
+            if (passScans.Count > 0) _db.ScanLogs.RemoveRange(passScans);
+            _db.AdminPasses.RemoveRange(studentPasses);
+        }
+
+        var resets = await _db.PasswordResets.Where(r => idSet.Contains(r.StudentId)).ToListAsync(ct);
+        if (resets.Count > 0) _db.PasswordResets.RemoveRange(resets);
+
+        var students = await _db.Students.Where(s => idSet.Contains(s.Id)).ToListAsync(ct);
+        var count = students.Count;
+        _db.Students.RemoveRange(students);
+
+        await _db.SaveChangesAsync(ct);
+        return count;
+    }
+
     public async Task<int> DeleteAllAsync(CancellationToken ct = default)
     {
         // FK-safe order: scans referencing student tickets → booking items → bookings →

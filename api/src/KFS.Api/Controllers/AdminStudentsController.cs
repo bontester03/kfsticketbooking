@@ -97,4 +97,22 @@ public class AdminStudentsController : ControllerBase
         var deleted = await _students.DeleteAllAsync(ct);
         return Ok(new { deleted });
     }
+
+    // Delete one student (FK-safe cascade — booking items + scans + their admin passes too).
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        await _students.DeleteAsync(id, ct);
+        return Ok(new { deleted = 1 });
+    }
+
+    // Bulk delete N students by id. Body: { "ids": ["...", "..."] }.
+    [HttpPost("delete-many")]
+    public async Task<IActionResult> DeleteMany([FromBody] DeleteManyRequest request, CancellationToken ct)
+    {
+        var deleted = await _students.DeleteManyAsync(request.Ids ?? Array.Empty<Guid>(), ct);
+        return Ok(new { deleted });
+    }
+
+    public record DeleteManyRequest(Guid[]? Ids);
 }
