@@ -18,12 +18,14 @@ public class BookingService : IBookingService
     private readonly IBlobStorage _blobs;
     private readonly IEmailService _email;
     private readonly ITicketEmailRenderer _emailRenderer;
+    private readonly IPassPdfRenderer _pdf;
     private readonly ISeatNotifier _notifier;
     private readonly ILogger<BookingService> _log;
 
     public BookingService(
         IApplicationDbContext db, ICurrentUser currentUser, IQrCodeService qr, IBlobStorage blobs,
-        IEmailService email, ITicketEmailRenderer emailRenderer, ISeatNotifier notifier, ILogger<BookingService> log)
+        IEmailService email, ITicketEmailRenderer emailRenderer, IPassPdfRenderer pdf,
+        ISeatNotifier notifier, ILogger<BookingService> log)
     {
         _db = db;
         _currentUser = currentUser;
@@ -31,6 +33,7 @@ public class BookingService : IBookingService
         _blobs = blobs;
         _email = email;
         _emailRenderer = emailRenderer;
+        _pdf = pdf;
         _notifier = notifier;
         _log = log;
     }
@@ -339,61 +342,11 @@ public class BookingService : IBookingService
 
         await _db.SaveChangesAsync(ct);
 
-        // Email: boys → one per ticket; girls → ONE email with both seats listed + 1 QR attached.
-        var emailItems = ev.Gender == EventGender.Female
-            ? new[] { booking.Items.OrderBy(i => i.ParentRole).First() }   // only the Mother item carries the QR
-            : booking.Items.ToArray();
+        // ONE email per booking with the styled multi-ticket PDF attached. The PDF
+        // is the same layout the portal's "Download tickets PDF" button produces —
+        // category badge / GATE / BLOCK / SEAT / ROW / Arabic pair / QR / receipt panel.
+        await SendBookingEmailAsync(booking, student, ev, isResend: false, ct);
 
-        foreach (var item in emailItems)
-        {
-            var png = _qr.RenderPng(item.QrCodePayload!);
-            var parentLabel = ev.Gender == EventGender.Female
-                ? ev.PairLabel        // "Mother & Grandmother"
-                : ParentRoleLabels.Label(item.ParentRole, ev.Gender);
-
-            var html = _emailRenderer.RenderTicket(new TicketEmailModel(
-                StudentEmail: student.Email,
-                ParentLabel: parentLabel,
-                StudentName: $"{student.FirstName} {student.LastName}",
-                TicketLast6: item.TicketNumber[^6..],
-                Group: booking.GroupChosen,
-                Block: BlockLabel(item.Zone!.Code),
-                Row: item.Seat!.RowLabel,
-                SeatNumber: item.Seat.SeatNumber,
-                EventName: ev.Name,
-                EventDate: ev.EventDate,
-                Venue: ev.Venue,
-                MapLink: ev.MapLink), png);
-
-            try
-            {
-                var subjectLabel = ev.Gender == EventGender.Female ? "tickets (Mother & Grandmother)"
-                                                                   : $"{parentLabel} ticket";
-                var msgId = await _email.SendAsync(new OutgoingEmail(
-                    student.Email,
-                    $"{ev.Name} — {subjectLabel}",
-                    html,
-                    new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
-                item.EmailSent = true;
-                item.EmailSentAt = DateTime.UtcNow;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Failed to send ticket email for booking item {ItemId}", item.Id);
-            }
-        }
-        // For girls, flip the Grandmother item's EmailSent flag in sync so MyBookings UI doesn't
-        // misleadingly show "email pending" for the second seat.
-        if (ev.Gender == EventGender.Female)
-        {
-            var mother = booking.Items.OrderBy(i => i.ParentRole).First();
-            var grandmother = booking.Items.OrderBy(i => i.ParentRole).Last();
-            if (mother.EmailSent)
-            {
-                grandmother.EmailSent = true;
-                grandmother.EmailSentAt = mother.EmailSentAt;
-            }
-        }
         await _db.SaveChangesAsync(ct);
 
         foreach (var item in booking.Items)
@@ -474,39 +427,88 @@ public class BookingService : IBookingService
         var ev = await _db.Events.FindAsync(new object[] { booking.EventId }, ct)
             ?? throw new NotFoundException("Event", booking.EventId);
 
-        // Same girls vs boys logic as the initial checkout: 1 combined email for girls,
-        // one per item for boys. Only items with a non-null QrCodePayload are emailed.
-        var emailItems = ev.Gender == EventGender.Female
-            ? booking.Items.Where(i => !string.IsNullOrEmpty(i.QrCodePayload)).ToArray()
-            : booking.Items.ToArray();
-
-        foreach (var item in emailItems)
-        {
-            var png = _qr.RenderPng(item.QrCodePayload!);
-            var label = ev.Gender == EventGender.Female
-                ? ev.PairLabel
-                : ParentRoleLabels.Label(item.ParentRole, ev.Gender);
-            var subjectLabel = ev.Gender == EventGender.Female ? "tickets (Mother & Grandmother)"
-                                                                : $"{label} ticket";
-            var html = _emailRenderer.RenderTicket(new TicketEmailModel(
-                student.Email, label,
-                $"{student.FirstName} {student.LastName}", item.TicketNumber[^6..],
-                booking.GroupChosen, BlockLabel(item.Zone!.Code), item.Seat!.RowLabel,
-                item.Seat.SeatNumber, ev.Name, ev.EventDate, ev.Venue, ev.MapLink), png);
-            await _email.SendAsync(new OutgoingEmail(
-                student.Email, $"{ev.Name} — {subjectLabel} (resend)", html,
-                new[] { new EmailAttachment($"{item.TicketNumber}.png", "image/png", png) }), ct);
-            item.EmailSent = true;
-            item.EmailSentAt = DateTime.UtcNow;
-        }
-        // Mirror EmailSent across the pair for girls (the Grandmother item shares the QR).
-        if (ev.Gender == EventGender.Female)
-        {
-            var mother = booking.Items.OrderBy(i => i.ParentRole).First();
-            var grandmother = booking.Items.OrderBy(i => i.ParentRole).Last();
-            if (mother.EmailSent) { grandmother.EmailSent = true; grandmother.EmailSentAt = mother.EmailSentAt; }
-        }
+        // Resend uses the same single-email + styled-PDF flow as the initial checkout.
+        await SendBookingEmailAsync(booking, student, ev, isResend: true, ct);
         await _db.SaveChangesAsync(ct);
+    }
+
+    // ---------- Shared booking-email path ----------
+    //
+    // Renders the full booking PDF (one styled ticket card per parent — Mother+Father for
+    // boys, Mother+Grandmother sharing one card for girls) and sends ONE email per booking
+    // with the PDF attached. The HTML body keeps a short summary; the PDF is the artifact
+    // the parents print or open on their phone.
+    private async Task SendBookingEmailAsync(Booking booking, Student student, Event ev, bool isResend, CancellationToken ct)
+    {
+        var qrItems = booking.Items.Where(i => !string.IsNullOrEmpty(i.QrCodePayload))
+                                    .OrderBy(i => i.ParentRole).ToList();
+        if (qrItems.Count == 0) return;
+
+        // Pair label is the same on every entry for one booking — both seats joined.
+        var pairLabel = string.Join(" & ", booking.Items.OrderBy(i => i.ParentRole)
+            .Select(i => i.Seat is null ? "" : $"{i.Seat.RowLabel}{i.Seat.SeatNumber}")
+            .Where(s => s.Length > 0));
+        var groupLetter = booking.GroupChosen == ZoneGroup.B ? "B" : "A";
+        var studentName = $"{student.FirstName} {student.LastName}".Trim();
+
+        // Build the StudentSeatTicketEntry list — boys: one entry per item; girls: one
+        // entry (the Mother item carries the shared QR).
+        var seats = qrItems.Select(item => new StudentSeatTicketEntry(
+            Group:        groupLetter,
+            Row:          item.Seat?.RowLabel ?? "",
+            Seat:         item.Seat?.SeatNumber ?? 0,
+            ParentRole:   ev.Gender == EventGender.Female
+                            ? ev.PairLabel
+                            : ParentRoleLabels.Label(item.ParentRole, ev.Gender),
+            StudentName:  studentName,
+            StudentEmail: student.Email,
+            TicketNumber: item.TicketNumber,
+            PairLabel:    pairLabel,
+            QrPng:        _qr.RenderPng(item.QrCodePayload!))).ToList();
+
+        var pdfBytes = _pdf.RenderStudentTickets(ev.Name, ev.EventDate, studentName, seats, guest: null);
+
+        var roleSummary = ev.Gender == EventGender.Female
+            ? "Mother & Grandmother"
+            : string.Join(" & ", qrItems.Select(i => ParentRoleLabels.Label(i.ParentRole, ev.Gender)));
+        var subjectSuffix = isResend ? " (resend)" : "";
+        var subject = $"{ev.Name} — {roleSummary} ticket{(qrItems.Count == 1 ? "" : "s")}{subjectSuffix}";
+
+        // Plain-but-on-brand HTML body — the PDF carries the styled visuals.
+        var html = $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#14241f"">
+  <h2 style=""color:#0d3128;margin:0 0 12px"">{System.Net.WebUtility.HtmlEncode(ev.Name)}</h2>
+  <p style=""font-size:14px"">Hello {System.Net.WebUtility.HtmlEncode(student.FirstName)},</p>
+  <p>Your tickets for <strong>{System.Net.WebUtility.HtmlEncode(roleSummary)}</strong> are attached as a PDF.</p>
+  <ul style=""font-size:14px;line-height:1.7"">
+    <li><strong>Block / Seats:</strong> VIP {System.Net.WebUtility.HtmlEncode(groupLetter)} · {System.Net.WebUtility.HtmlEncode(pairLabel)}</li>
+    <li><strong>Date:</strong> {ev.EventDate:dd MMM yyyy}</li>
+    <li><strong>Venue:</strong> {System.Net.WebUtility.HtmlEncode(ev.Venue)}</li>
+  </ul>
+  <p style=""font-size:13px;color:#475569"">Open the PDF on your phone (or print it) and present each QR code at the gate.</p>
+  <p style=""font-size:12px;color:#94a3b8;margin-top:18px"">King Faisal School — Event Management</p>
+</div>";
+
+        // Filename: first ticket's number is good enough for grouping in the inbox.
+        var fileName = $"kfs-tickets-{qrItems.First().TicketNumber}.pdf";
+
+        try
+        {
+            await _email.SendAsync(new OutgoingEmail(
+                student.Email,
+                subject,
+                html,
+                new[] { new EmailAttachment(fileName, "application/pdf", pdfBytes) }), ct);
+
+            foreach (var item in booking.Items)
+            {
+                item.EmailSent = true;
+                item.EmailSentAt = DateTime.UtcNow;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to send booking-email for booking {BookingId}", booking.Id);
+        }
     }
 
     public async Task ForceCancelAsync(Guid bookingId, CancellationToken ct = default)
