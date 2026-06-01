@@ -193,7 +193,9 @@ public class BookingService : IBookingService
         var zone = await _db.Zones.FirstOrDefaultAsync(z => z.EventId == ev.Id && z.Code == zoneCode, ct)
             ?? throw new NotFoundException("Zone", zoneCode);
 
-        // Pair the picked seat with its in-row neighbour.
+        // Pair the picked seat with its in-row neighbour: odd N pairs with N+1, even N pairs with N-1.
+        // So seats (1,2), (3,4), ..., (25,26) are the locked pairs. Picking either seat of a pair
+        // reserves both — that's by design so the student doesn't need to know which one is "primary".
         var picked = request.SeatNumber;
         var partner = picked % 2 == 1 ? picked + 1 : picked - 1;
         var seatNumbers = new[] { picked, partner };
@@ -204,8 +206,16 @@ public class BookingService : IBookingService
                         && seatNumbers.Contains(s.SeatNumber))
             .ToListAsync(ct);
         if (seats.Count != 2)
-            throw new NotFoundException("Seat-pair",
-                $"{request.RowLabel}-{picked} (partner {request.RowLabel}-{partner})");
+        {
+            // Most common cause: odd-numbered last seat of a row (partner = N+1 doesn't exist).
+            // Give the admin / student a concrete message so they understand WHY this seat can't
+            // stand alone instead of staring at a generic "not found" error.
+            throw new AppException("seat_pair_missing",
+                $"Seat {request.RowLabel}{picked} can't be picked on its own — its partner seat " +
+                $"{request.RowLabel}{partner} isn't part of the room. Pick a seat that has an " +
+                $"adjacent partner (pairs are 1-2, 3-4, … so any odd seat works).",
+                statusCode: 409);
+        }
 
         var motherSeat = seats.OrderBy(s => s.SeatNumber).First();
         var grandmotherSeat = seats.OrderBy(s => s.SeatNumber).Last();

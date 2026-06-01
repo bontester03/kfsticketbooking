@@ -85,24 +85,40 @@
   }
   .venue-vip-meta { @apply font-normal opacity-80; }
 
-  .venue-vip-sides { @apply grid grid-cols-2; }
+  .venue-vip-sides        { @apply grid grid-cols-2; }
+  /* Girls event: single-block VIP (no F/M side split). Full width, centered. */
+  .venue-vip-sides-single { @apply grid grid-cols-1; }
 
   .venue-side { @apply flex flex-col gap-2 p-2; }
   .venue-side-female { background: #fdeaf2; }
   .venue-side-male   { background: #d6efff; }
+  .venue-side-single { background: #f3eafe; }
 
   .venue-side-label {
     @apply mb-1 text-center text-[10px] font-bold uppercase tracking-widest text-kfs-forest/70;
   }
 
   .venue-rows { @apply flex flex-col gap-1; }
-  .venue-row  { @apply flex items-center gap-1; }
+  /* `justify-center` keeps the row centred when the seats don't fill the width
+     (girls single-block layout). With `flex-1` seats it's a no-op for boys. */
+  .venue-row  { @apply flex items-center justify-center gap-1; }
   .venue-row-label {
     @apply w-4 text-center text-[10px] font-bold text-kfs-forest;
   }
-  /* No wrapping, no scrollbar — 19 seats sit on a single line. Slightly bigger row spacing
-     so the ring on a picked seat doesn't bleed into its neighbour. */
-  .venue-row-seats { @apply flex flex-1 flex-nowrap gap-[3px]; }
+  /* No wrapping, no scrollbar — seats sit on a single line. Slightly bigger row spacing
+     so the ring on a picked seat doesn't bleed into its neighbour.
+     `justify-center` so the seats are centred within the row when they don't fill it. */
+  .venue-row-seats { @apply flex flex-1 flex-nowrap justify-center gap-[3px]; }
+
+  /* Pair-indicator: in the girls single-block layout, every even seat sits 2px
+     closer to the odd seat on its left, making the (1,2)(3,4)…(25,26) pairs
+     visually obvious so an admin sees at a glance that picking either selects both. */
+  .venue-side-single .venue-row-seats .venue-seat:nth-child(even) {
+    @apply ml-[-1px];
+  }
+  .venue-side-single .venue-row-seats .venue-seat:nth-child(odd):not(:first-child) {
+    @apply ml-1;
+  }
 
   /* Every seat is a bordered button. Selection pops via a thicker ring + bg switch + a
      small scale so the picked seat is unmistakable across the whole hall. */

@@ -185,7 +185,8 @@ export default function SeatMapPage() {
                 {t('rebook.confirmDetails', {
                   group: cartSeat.group,
                   row: cartSeat.rowLabel,
-                  seat: cartSeat.seatNumber
+                  seat: cartSeat.seatNumber,
+                  pair: (eventQ.data?.pairLabel ?? 'mother and father').toLowerCase()
                 })}
               </p>
               <p className="mt-1 text-xs text-kfs-sage-700">{t('rebook.cartHint')}</p>

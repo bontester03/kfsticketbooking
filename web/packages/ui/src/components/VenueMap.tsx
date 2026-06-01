@@ -107,7 +107,7 @@ function VipBlock({
       <header className="venue-vip-header">
         {label} <span className="venue-vip-meta">{meta}</span>
       </header>
-      <div className="venue-vip-sides">
+      <div className={isSingleBlock ? 'venue-vip-sides-single' : 'venue-vip-sides'}>
         {zones.map((z) => {
           // Boys: zone.Side is Female=1 or Male=2; girls: Side=None=0 (single block).
           const tone: 'female' | 'male' | 'single' =
