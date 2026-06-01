@@ -129,15 +129,17 @@ public static class DbSeeder
     //  - Guest 600, VVIP 100 (display only), Staff 100, Media 100, Visitors capacity unbounded.
     private static async Task SeedBoysZonesAsync(KfsDbContext db, Event ev)
     {
-        // VIP blocks — 5 rows, 15 seats per side, both sides per group.
+        // VIP blocks — 5 rows, 15 seats per side. Female numbered 1-15, Male 16-30
+        // so a single row reads continuously across the central aisle. This matches the
+        // physical seating chart ushers will hand out at the door.
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPAF, "VIP A — Female",
-            ZoneGroup.A, ZoneSide.Female, rows: 5, seatsPerRow: 15);
+            ZoneGroup.A, ZoneSide.Female, rows: 5, seatsPerRow: 15, seatNumberStart: 1);
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPAM, "VIP A — Male",
-            ZoneGroup.A, ZoneSide.Male,   rows: 5, seatsPerRow: 15);
+            ZoneGroup.A, ZoneSide.Male,   rows: 5, seatsPerRow: 15, seatNumberStart: 16);
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPBF, "VIP B — Female",
-            ZoneGroup.B, ZoneSide.Female, rows: 5, seatsPerRow: 15);
+            ZoneGroup.B, ZoneSide.Female, rows: 5, seatsPerRow: 15, seatNumberStart: 1);
         await CreateReservedZoneAsync(db, ev, ZoneCode.VIPBM, "VIP B — Male",
-            ZoneGroup.B, ZoneSide.Male,   rows: 5, seatsPerRow: 15);
+            ZoneGroup.B, ZoneSide.Male,   rows: 5, seatsPerRow: 15, seatNumberStart: 16);
 
         // Emergency green columns — hidden from students, 5 seats each.
         await CreateReservedZoneAsync(db, ev, ZoneCode.EMERG_A_LEFT,  "Emergency A Left",
@@ -197,7 +199,10 @@ public static class DbSeeder
     private static async Task CreateReservedZoneAsync(KfsDbContext db, Event ev,
         ZoneCode code, string displayName, ZoneGroup group, ZoneSide side,
         int rows, int seatsPerRow,
-        ZoneVisibility visibility = ZoneVisibility.PublicBookable)
+        ZoneVisibility visibility = ZoneVisibility.PublicBookable,
+        // Boys Male-side zones use a +15 offset so a row reads continuously across the aisle:
+        // Female 1-15 on the left, Male 16-30 on the right. Female-side + girls zones default to 1.
+        int seatNumberStart = 1)
     {
         var capacity = rows * seatsPerRow;
         var zone = new Zone
@@ -217,8 +222,9 @@ public static class DbSeeder
         for (var r = 0; r < rows; r++)
         {
             var rowLabel = ((char)('A' + r)).ToString();   // A, B, C, ...
-            for (var n = 1; n <= seatsPerRow; n++)
+            for (var i = 0; i < seatsPerRow; i++)
             {
+                var n = seatNumberStart + i;
                 db.Seats.Add(new Seat
                 {
                     ZoneId = zone.Id,

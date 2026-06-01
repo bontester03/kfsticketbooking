@@ -93,10 +93,18 @@ public class BookingService : IBookingService
         var pickedZone = zones.First(z => z.Code == pickedZoneCode);
         var mirrorZone = zones.First(z => z.Code == mirrorZoneCode);
 
+        // Boys VIP rows read continuously across the aisle: Female 1-15 on the left,
+        // Male 16-30 on the right. So when a student picks Female-A5 the mirror is
+        // Male-A20 (5+15), and Male-A20 mirrors back to Female-A5 (20-15).
+        const int boysMaleSideOffset = 15;
+        var mirrorSeatNumber = request.Side == ZoneSide.Female
+            ? request.SeatNumber + boysMaleSideOffset
+            : request.SeatNumber - boysMaleSideOffset;
+
         var seats = await _db.Seats
-            .Where(s => (s.ZoneId == pickedZone.Id || s.ZoneId == mirrorZone.Id)
-                        && s.RowLabel == request.RowLabel
-                        && s.SeatNumber == request.SeatNumber)
+            .Where(s => s.RowLabel == request.RowLabel
+                        && ((s.ZoneId == pickedZone.Id && s.SeatNumber == request.SeatNumber)
+                         || (s.ZoneId == mirrorZone.Id && s.SeatNumber == mirrorSeatNumber)))
             .ToListAsync(ct);
         if (seats.Count < 2)
             throw new NotFoundException("Seat", $"{request.RowLabel}-{request.SeatNumber}");
