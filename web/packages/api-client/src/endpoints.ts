@@ -76,7 +76,8 @@ export const endpoints = {
   // Student's own Guest ticket (1 QR, admits 3). 204 → null when not booked.
   guest: (c: AxiosInstance) => ({
     get: () => c.get<GuestPassDto | null>('/guest').then(r => r.status === 204 ? null : (r.data ?? null)),
-    book: () => c.post<GuestPassDto>('/guest').then(r => r.data)
+    book: () => c.post<GuestPassDto>('/guest').then(r => r.data),
+    cancel: () => c.delete<void>('/guest').then(r => r.data)
   }),
 
   // Public gate scanner — no auth; gated by the event scanner token.

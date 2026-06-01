@@ -23,6 +23,25 @@ export default function GuestTicketPage() {
     onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Could not book the guest ticket.')
   });
 
+  const cancel = useMutation({
+    mutationFn: () => api.guest.cancel(),
+    onSuccess: () => {
+      qc.setQueryData(['guest'], null);
+      void qc.invalidateQueries({ queryKey: ['guest'] });
+      toast.success('Guest ticket cancelled — you can book a new one any time.');
+    },
+    onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Could not cancel the guest ticket.')
+  });
+
+  const confirmCancel = () => {
+    if (!window.confirm(
+      'Cancel this guest ticket?\n\n' +
+      'The QR will stop working at the gate and you can book a fresh one.\n' +
+      'If your guests have already been scanned in, ask the school office to cancel for you.'
+    )) return;
+    cancel.mutate();
+  };
+
   if (guestQ.isLoading) return <LoadingPanel label="Loading your guest ticket…" />;
 
   const pass = guestQ.data;
@@ -37,7 +56,19 @@ export default function GuestTicketPage() {
       </div>
 
       {pass ? (
-        <GuestTicket pass={pass} />
+        <>
+          <GuestTicket pass={pass} />
+          <div className="flex justify-end">
+            <Button variant="danger" loading={cancel.isPending}
+                    disabled={pass.admittedCount > 0}
+                    onClick={confirmCancel}
+                    title={pass.admittedCount > 0
+                      ? 'Already scanned at the gate — ask the school office to cancel.'
+                      : 'Cancel this guest ticket so you can re-book.'}>
+              Cancel guest ticket
+            </Button>
+          </div>
+        </>
       ) : (
         <Card className="flex flex-col items-center gap-4 py-10 text-center">
           <EmptyState

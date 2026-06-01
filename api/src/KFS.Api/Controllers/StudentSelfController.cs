@@ -39,6 +39,14 @@ public class StudentSelfController : ControllerBase
     public Task<KFS.Application.DTOs.Passes.GuestPassDto> BookGuestPass(CancellationToken ct)
         => _guest.BookForStudentAsync(StudentId, issuedByAdminId: null, issuedToName: null, ct);
 
+    // Student-initiated cancel of their own guest ticket. Blocked if already scanned.
+    [HttpDelete("guest")]
+    public async Task<IActionResult> CancelGuestPass(CancellationToken ct)
+    {
+        await _guest.CancelForStudentAsync(StudentId, ct);
+        return NoContent();
+    }
+
     // Combined PDF: every parent pass + the guest ticket (if any) for the signed-in child.
     [HttpGet("me/tickets.pdf")]
     public async Task<IActionResult> TicketsBundle(CancellationToken ct)

@@ -81,9 +81,61 @@ public class GuestPassService : IGuestPassService
             .Include(p => p.Student)
             .FirstOrDefaultAsync(p => p.StudentId == studentId && p.Type == AdminPassType.Guest, ct);
         if (pass is null) return null;
+
+        // Auto-heal the QR PNG file if the underlying blob/disk artifact went missing
+        // (e.g. Railway container redeployed without a persistent volume mounted).
+        // The QrCodePayload is durable in the DB, so we can always re-render the PNG
+        // and re-upload it under the same blob path. Idempotent and cheap (~50ms).
+        if (!string.IsNullOrEmpty(pass.QrCodePayload))
+        {
+            try
+            {
+                var png = _qr.RenderPng(pass.QrCodePayload);
+                var refreshed = await _blobs.SaveAsync(
+                    $"qr-codes/{pass.EventId}/{pass.TicketNumber}.png", png, "image/png", ct);
+                if (!string.Equals(refreshed, pass.QrCodeImageUrl, StringComparison.Ordinal))
+                {
+                    pass.QrCodeImageUrl = refreshed;
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception)
+            {
+                // Best-effort heal — don't block the page if blob storage is unreachable
+                // momentarily. The Map() call below still returns whatever URL we have.
+            }
+        }
+
         var admitted = await AdmittedCountAsync(pass.Id, ct);
         var gate = await GateForStudentAsync(pass.StudentId, ct);
         return Map(pass, pass.Student, admitted, gate);
+    }
+
+    /// <summary>Student cancels their own guest ticket. Wipes the pass + its scan history.
+    /// They can then re-book a fresh one via BookForStudentAsync. Blocks if the QR has
+    /// already been scanned at the gate so attendance records stay clean.</summary>
+    public async Task CancelForStudentAsync(Guid studentId, CancellationToken ct = default)
+    {
+        var pass = await _db.AdminPasses
+            .FirstOrDefaultAsync(p => p.StudentId == studentId && p.Type == AdminPassType.Guest, ct)
+            ?? throw new NotFoundException("Guest pass", studentId);
+
+        // Once anyone has been admitted on this QR the student can't just void it —
+        // they'd be discarding a successful gate entry. Admin override is the path for that.
+        var admitted = await AdmittedCountAsync(pass.Id, ct);
+        if (admitted > 0)
+            throw new AppException("already_scanned",
+                $"This guest ticket has already admitted {admitted} guest{(admitted == 1 ? "" : "s")} — ask the school office to cancel it for you.");
+
+        // Drop any scan-log rows that reference this pass (defensive — there shouldn't
+        // be any Valid scans, but Invalid / Expired entries can exist from QR misreads).
+        var scans = await _db.ScanLogs
+            .Where(s => s.ScannedItemType == ScannedItemType.AdminPass && s.ItemId == pass.Id)
+            .ToListAsync(ct);
+        if (scans.Count > 0) _db.ScanLogs.RemoveRange(scans);
+
+        _db.AdminPasses.Remove(pass);
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task<GuestAnalyticsDto> GetAnalyticsAsync(Guid eventId, CancellationToken ct = default)
