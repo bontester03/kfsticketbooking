@@ -10,10 +10,34 @@ public class StudentTicketBundleService : IStudentTicketBundleService
     private readonly IApplicationDbContext _db;
     private readonly IQrCodeService _qr;
     private readonly IPassPdfRenderer _pdf;
+    private readonly IEmailService _email;
 
-    public StudentTicketBundleService(IApplicationDbContext db, IQrCodeService qr, IPassPdfRenderer pdf)
+    public StudentTicketBundleService(IApplicationDbContext db, IQrCodeService qr,
+        IPassPdfRenderer pdf, IEmailService email)
     {
-        _db = db; _qr = qr; _pdf = pdf;
+        _db = db; _qr = qr; _pdf = pdf; _email = email;
+    }
+
+    public async Task SendBundleEmailAsync(Guid studentId, CancellationToken ct = default)
+    {
+        var (bytes, fileName) = await BuildAsync(studentId, ct);
+        var student = await _db.Students.FirstOrDefaultAsync(s => s.Id == studentId, ct)
+            ?? throw new NotFoundException("Student", studentId);
+        var ev = await _db.Events.FindAsync(new object[] { student.EventId }, ct);
+
+        var html = $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#14241f"">
+  <h2 style=""color:#0d3128;margin:0 0 12px"">{System.Net.WebUtility.HtmlEncode(ev?.Name ?? "King Faisal School")}</h2>
+  <p style=""font-size:14px"">Hello {System.Net.WebUtility.HtmlEncode(student.FirstName)},</p>
+  <p>Your complete ticket bundle (parent seats + guest ticket) is attached as a PDF.</p>
+  <p style=""font-size:13px;color:#475569"">Open it on your phone or print it. Each QR is scanned at its own gate.</p>
+  <p style=""font-size:12px;color:#94a3b8;margin-top:18px"">King Faisal School — Event Management</p>
+</div>";
+
+        await _email.SendAsync(new OutgoingEmail(
+            student.Email,
+            $"{ev?.Name ?? "KFS"} — All your tickets",
+            html,
+            new[] { new EmailAttachment(fileName, "application/pdf", bytes) }), ct);
     }
 
     public async Task<(byte[] Bytes, string FileName)> BuildAsync(Guid studentId, CancellationToken ct = default)

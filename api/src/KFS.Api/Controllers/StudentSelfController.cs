@@ -55,6 +55,14 @@ public class StudentSelfController : ControllerBase
         return File(bytes, "application/pdf", fileName);
     }
 
+    // Email the same combined PDF (parent + guest) to the student. Dashboard "Email all my tickets" button.
+    [HttpPost("me/tickets/send-emails")]
+    public async Task<IActionResult> EmailTicketsBundle(CancellationToken ct)
+    {
+        await _bundle.SendBundleEmailAsync(StudentId, ct);
+        return Ok(new { sent = true });
+    }
+
     [HttpGet("me")]
     public async Task<object> Me(CancellationToken ct)
     {

@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useAuthStore } from '@kfs/api-client';
 import { Button, Card, CountdownPill, EmptyState, LoadingPanel } from '@kfs/ui';
 import { useTranslation } from '@kfs/i18n';
 import { formatRiyadhDate } from '@kfs/utils';
+import type { ApiError } from '@kfs/types';
 import { BookingStatus } from '@kfs/types';
 import { api } from '../api';
 
@@ -76,12 +78,31 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-kfs-sage-700">
             {active.items.map(i => i.fullLabel).join(' · ')}
           </p>
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Link to="/bookings"><Button variant="secondary">{t('dashboard.viewBooking')}</Button></Link>
+            <SendAllTicketsButton hasGuest={!!guestPass} />
           </div>
         </Card>
       )}
     </div>
+  );
+}
+
+// Dashboard CTA — emails the combined PDF (parent seats + guest ticket if booked)
+// using the same renderer the "Download tickets PDF" button uses. Shows up once
+// the parent booking is confirmed; mentions whether the guest ticket is bundled too.
+function SendAllTicketsButton({ hasGuest }: { hasGuest: boolean }) {
+  const m = useMutation({
+    mutationFn: () => api.bookings.emailAllPdf(),
+    onSuccess: () => toast.success(
+      hasGuest ? 'All tickets (parent + guest) emailed to you.'
+               : 'Parent tickets emailed. Book your guest ticket to include it too.'),
+    onError: (e) => toast.error((e as unknown as ApiError)?.message ?? 'Could not send the email.')
+  });
+  return (
+    <Button variant="accent" loading={m.isPending} onClick={() => m.mutate()}>
+      Email all my tickets
+    </Button>
   );
 }
 

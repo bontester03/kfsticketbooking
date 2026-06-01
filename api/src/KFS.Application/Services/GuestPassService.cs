@@ -12,10 +12,13 @@ public class GuestPassService : IGuestPassService
     private readonly IApplicationDbContext _db;
     private readonly IQrCodeService _qr;
     private readonly IBlobStorage _blobs;
+    private readonly IPassPdfRenderer _pdf;
+    private readonly IEmailService _email;
 
-    public GuestPassService(IApplicationDbContext db, IQrCodeService qr, IBlobStorage blobs)
+    public GuestPassService(IApplicationDbContext db, IQrCodeService qr, IBlobStorage blobs,
+        IPassPdfRenderer pdf, IEmailService email)
     {
-        _db = db; _qr = qr; _blobs = blobs;
+        _db = db; _qr = qr; _blobs = blobs; _pdf = pdf; _email = email;
     }
 
     public async Task<GuestPassDto> BookForStudentAsync(Guid studentId, Guid? issuedByAdminId, string? issuedToName, CancellationToken ct = default)
@@ -72,6 +75,43 @@ public class GuestPassService : IGuestPassService
         await _db.SaveChangesAsync(ct);
 
         var gate = await GateForStudentAsync(studentId, ct);
+
+        // Fire-and-forget guest-ticket email — same styled PDF layout the portal
+        // shows, attached as one-page PDF. Student doesn't have to chase the gate
+        // for a new QR; it lands in their inbox the moment they self-book.
+        var studentName = $"{student.FirstName} {student.LastName}".Trim();
+        var pdfBytes = _pdf.RenderStudentTickets(
+            ev.Name, ev.EventDate, studentName,
+            seats: Array.Empty<StudentSeatTicketEntry>(),
+            guest: new PassPdfEntry(pass.TicketNumber, 1, png, guestSeats, studentName, gate));
+
+        var html = $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#14241f"">
+  <h2 style=""color:#0d3128;margin:0 0 12px"">{System.Net.WebUtility.HtmlEncode(ev.Name)}</h2>
+  <p style=""font-size:14px"">Hello {System.Net.WebUtility.HtmlEncode(student.FirstName)},</p>
+  <p>Your <strong>Guest ticket</strong> is attached as a PDF. One QR admits <strong>{guestSeats} guests</strong> at <strong>{System.Net.WebUtility.HtmlEncode(gate)}</strong>.</p>
+  <ul style=""font-size:14px;line-height:1.7"">
+    <li><strong>Ticket #:</strong> {System.Net.WebUtility.HtmlEncode(pass.TicketNumber)}</li>
+    <li><strong>Date:</strong> {ev.EventDate:dd MMM yyyy}</li>
+    <li><strong>Venue:</strong> {System.Net.WebUtility.HtmlEncode(ev.Venue)}</li>
+  </ul>
+  <p style=""font-size:13px;color:#475569"">Open the PDF on your phone (or print it) and present the QR at the Guest gate — each scan admits one guest.</p>
+  <p style=""font-size:12px;color:#94a3b8;margin-top:18px"">King Faisal School — Event Management</p>
+</div>";
+
+        var sender = _email;
+        var toEmail = student.Email;
+        var subject = $"{ev.Name} — Guest ticket (admits {guestSeats})";
+        var fileName = $"kfs-guest-{pass.TicketNumber}.pdf";
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await sender.SendAsync(new OutgoingEmail(toEmail, subject, html,
+                    new[] { new EmailAttachment(fileName, "application/pdf", pdfBytes) }), CancellationToken.None);
+            }
+            catch { /* SmtpEmailService logs its own failures */ }
+        });
+
         return Map(pass, student, 0, gate);
     }
 

@@ -70,7 +70,9 @@ export const endpoints = {
       const disp = (resp.headers as Record<string, string>)['content-disposition'] ?? '';
       const m = /filename="?([^"]+)"?/.exec(disp);
       downloadBlob(resp.data as Blob, m?.[1] ?? 'kfs-tickets.pdf');
-    }
+    },
+    // Send the same combined PDF to the student's email. Dashboard button.
+    emailAllPdf: () => c.post<{ sent: boolean }>('/me/tickets/send-emails').then(r => r.data)
   }),
 
   // Student's own Guest ticket (1 QR, admits 3). 204 → null when not booked.
