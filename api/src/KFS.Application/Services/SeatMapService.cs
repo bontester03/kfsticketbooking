@@ -17,17 +17,30 @@ public class SeatMapService : ISeatMapService
         if (group is not (ZoneGroup.A or ZoneGroup.B))
             throw new AppException("bad_input", "Group must be A or B.");
 
-        var femaleCode = BookingService.ZoneCodeFor(group, ZoneSide.Female);
-        var maleCode = BookingService.ZoneCodeFor(group, ZoneSide.Male);
+        var ev = await _db.Events.FindAsync(new object[] { eventId }, ct)
+            ?? throw new NotFoundException("Event", eventId);
+
+        // Boys events split each VIP group into Female-side + Male-side zones.
+        // Girls events use one single-block zone per group (VIPA / VIPB).
+        ZoneCode[] expectedCodes = ev.Gender == EventGender.Female
+            ? new[] { group == ZoneGroup.A ? ZoneCode.VIPA : ZoneCode.VIPB }
+            : new[]
+              {
+                  BookingService.ZoneCodeFor(group, ZoneSide.Female),
+                  BookingService.ZoneCodeFor(group, ZoneSide.Male)
+              };
 
         var zones = await _db.Zones
-            .Where(z => z.EventId == eventId && (z.Code == femaleCode || z.Code == maleCode))
+            .Where(z => z.EventId == eventId && expectedCodes.Contains(z.Code))
             .Include(z => z.Seats)
             .ToListAsync(ct);
-        if (zones.Count < 2) throw new NotFoundException("Zones", $"{group}/{femaleCode}/{maleCode}");
+        if (zones.Count != expectedCodes.Length)
+            throw new NotFoundException("Zones",
+                $"{group} expected [{string.Join(", ", expectedCodes)}], found [{string.Join(", ", zones.Select(z => z.Code))}]");
 
-        var female = zones.First(z => z.Code == femaleCode);
-        var male = zones.First(z => z.Code == maleCode);
+        // Keep zone order stable: Female-side first then Male-side for boys; just the
+        // one zone for girls. Stable order lets the UI render columns left-to-right.
+        zones = expectedCodes.Select(code => zones.First(z => z.Code == code)).ToList();
 
         var seatIds = zones.SelectMany(z => z.Seats).Select(s => s.Id).ToHashSet();
         var now = DateTime.UtcNow;
@@ -58,6 +71,6 @@ public class SeatMapService : ISeatMapService
                 return new SeatMapSeatDto(s.Id, s.RowLabel, s.SeatNumber, s.FullLabel, SeatStatus.Available, null, null);
             }).ToList());
 
-        return new SeatMapDto(group, BuildZone(female), BuildZone(male));
+        return new SeatMapDto(group, zones.Select(BuildZone).ToList());
     }
 }

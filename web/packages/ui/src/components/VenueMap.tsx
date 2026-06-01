@@ -47,8 +47,7 @@ export function VenueMap({
           <VipBlock
             label="VIP B"
             group="B"
-            femaleZone={groupB.femaleZone}
-            maleZone={groupB.maleZone}
+            zones={groupB.zones}
             pendingSelection={pendingSelection?.group === 'B' ? pendingSelection : null}
             confirmedSeat={confirmedSeat?.group === 'B' ? confirmedSeat : null}
             readOnly={readOnly}
@@ -58,8 +57,7 @@ export function VenueMap({
           <VipBlock
             label="VIP A"
             group="A"
-            femaleZone={groupA.femaleZone}
-            maleZone={groupA.maleZone}
+            zones={groupA.zones}
             pendingSelection={pendingSelection?.group === 'A' ? pendingSelection : null}
             confirmedSeat={confirmedSeat?.group === 'A' ? confirmedSeat : null}
             readOnly={readOnly}
@@ -87,8 +85,8 @@ export function VenueMap({
 interface VipBlockProps {
   label: string;
   group: 'A' | 'B';
-  femaleZone: SeatMapDto['femaleZone'];
-  maleZone: SeatMapDto['maleZone'];
+  /** 2 zones for the boys event (Female-side + Male-side), 1 for the girls event (single block). */
+  zones: SeatMapDto['zones'];
   pendingSelection: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
   confirmedSeat: { side: ZoneSide; rowLabel: string; seatNumber: number } | null;
   readOnly?: boolean;
@@ -97,43 +95,47 @@ interface VipBlockProps {
 }
 
 function VipBlock({
-  label, group, femaleZone, maleZone, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
+  label, group, zones, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
 }: VipBlockProps) {
+  const sumSeats = zones.reduce((n, z) => n + z.seats.length, 0);
+  const isSingleBlock = zones.length === 1;
+  const meta = isSingleBlock
+    ? `· ${sumSeats} seats · Mother & Grandmother pair`
+    : `· ${zones.length} sides × ${zones[0]?.seats.length ?? 0} seats`;
   return (
     <div className="venue-vip">
       <header className="venue-vip-header">
-        {label} <span className="venue-vip-meta">· 4 rows × 2 sides × 19 seats</span>
+        {label} <span className="venue-vip-meta">{meta}</span>
       </header>
       <div className="venue-vip-sides">
-        <SidePane
-          tone="female"
-          seats={femaleZone.seats}
-          group={group}
-          side={ZoneSide.Female}
-          pendingSelection={pendingSelection}
-          confirmedSeat={confirmedSeat}
-          readOnly={readOnly}
-          disabled={disabled}
-          onSelect={onSelect}
-        />
-        <SidePane
-          tone="male"
-          seats={maleZone.seats}
-          group={group}
-          side={ZoneSide.Male}
-          pendingSelection={pendingSelection}
-          confirmedSeat={confirmedSeat}
-          readOnly={readOnly}
-          disabled={disabled}
-          onSelect={onSelect}
-        />
+        {zones.map((z) => {
+          // Boys: zone.Side is Female=1 or Male=2; girls: Side=None=0 (single block).
+          const tone: 'female' | 'male' | 'single' =
+            z.side === ZoneSide.Female ? 'female' :
+            z.side === ZoneSide.Male   ? 'male'   :
+                                         'single';
+          return (
+            <SidePane
+              key={z.zoneId}
+              tone={tone}
+              seats={z.seats}
+              group={group}
+              side={z.side}
+              pendingSelection={pendingSelection}
+              confirmedSeat={confirmedSeat}
+              readOnly={readOnly}
+              disabled={disabled}
+              onSelect={onSelect}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
 interface SidePaneProps {
-  tone: 'female' | 'male';
+  tone: 'female' | 'male' | 'single';
   seats: SeatMapSeatDto[];
   group: 'A' | 'B';
   side: ZoneSide;
@@ -161,7 +163,11 @@ function SidePane({
 
   return (
     <div className={clsx('venue-side', `venue-side-${tone}`)}>
-      <div className="venue-side-label">{tone === 'female' ? 'Female (Mother)' : 'Male (Father)'}</div>
+      <div className="venue-side-label">{
+        tone === 'female' ? 'Female (Mother)' :
+        tone === 'male'   ? 'Male (Father)'   :
+                            'Mother & Grandmother (adjacent pair)'
+      }</div>
       <div className="venue-rows">
         {rows.map(([rowLabel, rowSeats]) => (
           <div key={rowLabel} className="venue-row">

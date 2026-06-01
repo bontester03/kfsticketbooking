@@ -79,10 +79,11 @@ export interface SeatMapZoneDto {
   seats: SeatMapSeatDto[];
 }
 
+// Boys events return 2 zones per group (Female-side + Male-side);
+// girls events return 1 single-block zone per group.
 export interface SeatMapDto {
   group: ZoneGroup;
-  femaleZone: SeatMapZoneDto;
-  maleZone: SeatMapZoneDto;
+  zones: SeatMapZoneDto[];
 }
 
 export interface BookingItemDto {

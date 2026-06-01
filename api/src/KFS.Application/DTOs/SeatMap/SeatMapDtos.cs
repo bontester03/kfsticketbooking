@@ -26,7 +26,9 @@ public record SeatMapZoneDto(
     int Capacity,
     IReadOnlyList<SeatMapSeatDto> Seats);
 
+// Boys event returns TWO zones per group (Female-side + Male-side); girls returns
+// ONE single-block zone per group. The shape is now a list so the UI can render
+// either flavour without knowing the event gender up front.
 public record SeatMapDto(
     ZoneGroup Group,
-    SeatMapZoneDto FemaleZone,
-    SeatMapZoneDto MaleZone);
+    IReadOnlyList<SeatMapZoneDto> Zones);
