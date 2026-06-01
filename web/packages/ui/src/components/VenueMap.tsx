@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
-import type { SeatMapDto, SeatMapSeatDto } from '@kfs/types';
+import type { EventGender, SeatMapDto, SeatMapSeatDto } from '@kfs/types';
 import { SeatStatus, ZoneSide } from '@kfs/types';
 
 interface SeatRef {
@@ -13,6 +13,10 @@ interface SeatRef {
 interface VenueMapProps {
   groupA: SeatMapDto;
   groupB: SeatMapDto;
+  /** Drives the bottom-strip wording (Guest / Staff / Media capacities) and the
+   *  legend ("auto-paired mirror" vs "adjacent partner"). Defaults to boys (1)
+   *  if not supplied. */
+  eventGender?: EventGender;
   /** Seat the user has tentatively picked (client-side only, no API hit yet). */
   pendingSelection?: SeatRef | null;
   /** The user's already-confirmed seat (renders distinctively, non-clickable). */
@@ -34,8 +38,19 @@ interface VenueMapProps {
  * with `venue-seat-yours`.
  */
 export function VenueMap({
-  groupA, groupB, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
+  groupA, groupB, eventGender, pendingSelection, confirmedSeat, readOnly, disabled, onSelect
 }: VenueMapProps) {
+  // Capacity / QR counts are taken straight from the project spec (PDF page 1 / 4).
+  // Single source for the bottom-strip + admin seat-map view; keep both events here.
+  const isGirls = eventGender === 2; // EventGender.Female
+  const guestCopy = isGirls
+    ? '500 seats · 75 student QRs × 5 seats (email) + 125 extra QR PDFs'
+    : '600 seats · 150 student QRs × 3 seats (email) + 150 extra QR PDFs';
+  const staffCopy = '100 seats · admin-issued QR';
+  const mediaCopy = isGirls
+    ? '50 seats · admin-issued QR'
+    : '100 seats · admin-issued QR';
+
   return (
     <div className="venue">
       <div className="venue-stage">
@@ -67,17 +82,17 @@ export function VenueMap({
         </div>
 
         <aside className="venue-right-rail">
-          <ZoneTile title="Staff Zone" subtitle="100 seats · admin-issued QR" tone="staff" />
-          <ZoneTile title="Media Zone" subtitle="100 seats · admin-issued QR" tone="media" />
+          <ZoneTile title="Staff Zone" subtitle={staffCopy} tone="staff" />
+          <ZoneTile title="Media Zone" subtitle={mediaCopy} tone="media" />
         </aside>
 
         <div className="venue-guest">
           <strong>Guest Zone</strong>
-          <span>600 seats · admin issues 200 QR cards × 3 seats each</span>
+          <span>{guestCopy}</span>
         </div>
       </div>
 
-      <Legend showYours={!!confirmedSeat} />
+      <Legend showYours={!!confirmedSeat} isGirls={isGirls} />
     </div>
   );
 }
@@ -235,13 +250,16 @@ function ZoneTile({ title, subtitle, tone }: { title: string; subtitle: string; 
   );
 }
 
-function Legend({ showYours }: { showYours: boolean }) {
+function Legend({ showYours, isGirls = false }: { showYours: boolean; isGirls?: boolean }) {
+  // Boys event: picking one side auto-pairs the mirror seat on the OTHER side.
+  // Girls event: picking a seat auto-pairs the ADJACENT seat in the same block.
+  const pairLabel = isGirls ? 'Adjacent partner (auto-paired)' : 'Auto-paired mirror';
   return (
     <div className="venue-legend">
       <span><i className="venue-swatch venue-seat-available" /> Available</span>
       <span><i className="venue-swatch venue-seat-held" /> Held</span>
       <span><i className="venue-swatch venue-seat-booked" /> Booked</span>
-      <span><i className="venue-swatch venue-seat-mirror" /> Auto-paired mirror</span>
+      <span><i className="venue-swatch venue-seat-mirror" /> {pairLabel}</span>
       {showYours && <span><i className="venue-swatch venue-seat-yours" /> Your seat</span>}
     </div>
   );

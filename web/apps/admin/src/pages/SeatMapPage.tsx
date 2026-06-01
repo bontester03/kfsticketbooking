@@ -6,6 +6,10 @@ import { useEventContext } from '../lib/eventContext';
 
 export default function SeatMapPage() {
   const eventId = useEventContext((s) => s.eventId);
+  // Pulled from EventContext so the bottom-strip labels (Guest/Staff/Media
+  // capacities) and the legend ("auto-paired mirror" vs "adjacent partner")
+  // match whichever event the admin is currently viewing.
+  const gender = useEventContext((s) => s.gender);
   const groupAQ = useQuery({
     queryKey: ['admin', 'seatmap', eventId, 'A'],
     queryFn: () => api.admin.seatMap(ZoneGroup.A),
@@ -38,6 +42,7 @@ export default function SeatMapPage() {
           <VenueMap
             groupA={groupAQ.data!}
             groupB={groupBQ.data!}
+            eventGender={gender ?? undefined}
             readOnly
             onSelect={() => { /* read-only in admin */ }}
           />

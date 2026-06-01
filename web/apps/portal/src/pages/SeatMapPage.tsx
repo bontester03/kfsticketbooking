@@ -168,7 +168,7 @@ export default function SeatMapPage() {
           </div>
         </Card>
 
-        <VenueMap groupA={groupA} groupB={groupB} confirmedSeat={confirmedSeat} readOnly onSelect={() => undefined} />
+        <VenueMap groupA={groupA} groupB={groupB} eventGender={eventQ.data?.gender} confirmedSeat={confirmedSeat} readOnly onSelect={() => undefined} />
       </div>
     );
   }
@@ -212,6 +212,7 @@ export default function SeatMapPage() {
         <VenueMap
           groupA={groupA}
           groupB={groupB}
+          eventGender={eventQ.data?.gender}
           pendingSelection={cartSeat}
           disabled
           onSelect={() => undefined}
@@ -230,6 +231,7 @@ export default function SeatMapPage() {
       <VenueMap
         groupA={groupA}
         groupB={groupB}
+        eventGender={eventQ.data?.gender}
         disabled={select.isPending}
         onSelect={(args) => {
           // Optimistically reserve on the server — other students immediately see this seat
